@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Stock Quick Add",
+  "version": "2.3.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxb52SKlUNaiO0QzXpmZ5khty1EzpB7DIKMriEfFGOHQk60xmP/jCWF2MRnbagerQ5ir/A6y7nWlgsqmOwIhzT+p4L9U6uvxkm1eXWLx0sS0jrYRu6uqsJhjEEDgdr/N4/Obydvi0Fsp7EklK+nvKIai4+4r/ZguP/oqBeinb1mLwKkAEmhMQP2JVyk5vEEjHKdB0i6qpX8j+EK6ZAvjL9t5cokocN7tcmFME7TMj1Ey8EUoLZgls+kTA3ZLRvoOQZW4kvZ9+EO4Vcncm4vDgd9rWmiulFlUzTdHCWW6SIr6w1+al0o0pP5ljUhct5MIhsPoEiAVSmwhWveqfGn+zCwIDAQAB",
+  "description": "Приём остатков по штрихкоду и смена способа оплаты продажи — в боковой панели.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://*.ox-sys.com/*",
+    "https://*.oxapp.io/*"
+  ],
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Stock Quick Add",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "commands": {
+    "open-panel": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "MacCtrl+Shift+S"
+      },
+      "description": "Открыть панель Stock Quick Add"
+    }
+  }
+}

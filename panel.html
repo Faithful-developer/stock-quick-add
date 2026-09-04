@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stock Quick Add</title>
+  <link rel="stylesheet" href="panel.css">
+  <link rel="stylesheet" href="payment.css">
+</head>
+<body>
+
+<!-- Shown when no profile has a subdomain and token yet. -->
+<section id="setup" class="setup" hidden>
+  <p class="setup__text">Не заданы токен и адрес сервера.</p>
+  <button type="button" id="openOptions" class="cta">Открыть настройки</button>
+</section>
+
+<main id="app" hidden>
+
+  <div class="nav">
+    <!-- The select is transparent and sits over the name, so account switching
+         uses the platform menu instead of a hand-rolled popup. -->
+    <span id="acct" class="acct acct--single">
+      <span id="profileName" class="acct__name"></span>
+      <svg class="acct__chev" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"/></svg>
+      <select id="profile" class="acct__select" aria-label="Аккаунт"></select>
+    </span>
+    <button type="button" id="openSettings" class="navbtn" title="Настройки и аккаунты" aria-label="Настройки и аккаунты">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H2.8a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V2.8a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </div>
+
+
+  <!-- Two tools, one profile. The choice is remembered across panel opens. -->
+  <div id="tabs" class="tabs" role="tablist">
+    <button type="button" id="tabStock" class="tab tab--on" role="tab" aria-selected="true">Stock</button>
+    <button type="button" id="tabPay" class="tab" role="tab" aria-selected="false">Оплата</button>
+  </div>
+
+  <div id="stockView">
+  <h1 class="h1">Stock</h1>
+
+  <div class="scan">
+    <svg class="scan__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="butt"><path d="M3.5 6v12" stroke-width="2"/><path d="M7 6v12" stroke-width="1"/><path d="M10 6v12" stroke-width="2.6"/><path d="M13.6 6v12" stroke-width="1"/><path d="M16.4 6v12" stroke-width="1.8"/><path d="M19.2 6v12" stroke-width="1"/><path d="M21.4 6v12" stroke-width="1.6"/></svg>
+    <input
+      id="barcode"
+      class="scan__input"
+      type="text"
+      autocomplete="off"
+      autocorrect="off"
+      spellcheck="false"
+      placeholder="Отсканируйте штрихкод">
+  </div>
+
+  <!-- Errors and progress. Rendered as a banner when it carries a failure. -->
+  <div id="status" hidden></div>
+
+  <!-- Last successful write, with the undo affordance. Persists until the
+       next scan, unlike a toast that vanishes before it is read. -->
+  <div id="done" class="banner" hidden>
+    <span class="banner__i banner__i--ok">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6.5L9 17.5l-5-5"/></svg>
+    </span>
+    <div>
+      <div id="doneTitle" class="banner__t"></div>
+      <div id="doneSub" class="banner__s"></div>
+      <div class="banner__a">
+        <button type="button" id="undo" class="link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 15.5 5 11l4.5-4.5"/><path d="M5 11h8a5.5 5.5 0 0 1 0 11h-2"/></svg>
+          Отменить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Product card, filled via textContent only. -->
+  <section id="card" hidden>
+    <div class="group" style="margin-top: 22px">
+      <div class="prod">
+        <div id="pName" class="prod__n"></div>
+        <div id="pVariation" class="prod__v"></div>
+      </div>
+      <div class="row row--static" id="skuRow"><span>Артикул</span><span id="pSku" class="row__v"></span></div>
+      <div class="row row--static"><span>Штрихкод</span><span id="pBarcode" class="row__v"></span></div>
+      <div class="row row--static"><span>Цена</span><span id="pPrice" class="row__v"></span></div>
+      <div class="stock">
+        <span class="stock__l">Всего на складах</span>
+        <span id="pStock" class="stock__v"></span>
+      </div>
+    </div>
+
+    <!-- One row per stock lot; the correction is written against exactly one. -->
+    <p class="sect"><span>Локация</span></p>
+    <div id="locs" class="group"></div>
+    <p id="lotHint" class="note note--left" hidden></p>
+
+    <p class="sect"><span>Количество</span></p>
+    <div class="stepper">
+      <button type="button" id="qtyMinus" class="stepper__b" aria-label="Меньше">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+      <!-- max is a real guard, not decoration: a barcode typed into this box by
+           a scanner is a valid number, and the correction is auto-approved. -->
+      <input id="qty" class="stepper__v" type="number" min="1" max="10000" step="1"
+             value="1" inputmode="numeric" aria-label="Количество">
+      <button type="button" id="qtyPlus" class="stepper__b" aria-label="Больше">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <button type="button" id="submit" class="cta">Добавить на склад</button>
+    <p class="note">Повторный скан — +1 · Enter — добавить</p>
+  </section>
+
+  <!-- Журнал приёма: последние 20 из 500, хранится в chrome.storage.local. -->
+  <section class="log">
+    <p class="sect"><span>Журнал</span><span id="logCount" class="sect__count">0</span></p>
+    <ul id="logList" class="list"></ul>
+    <p id="logEmpty" class="note note--left">Операций пока нет</p>
+  </section>
+
+  </div><!-- /stockView -->
+
+  <!-- Смена способа оплаты. Логика в payment.js, стили в payment.css. -->
+  <div id="payView" hidden>
+    <h1 class="h1">Оплата</h1>
+
+    <p class="sect" style="margin-top: 0"><span>Номер продажи</span></p>
+    <div id="payScan" class="scan scan--pay">
+      <svg class="scan__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>
+      <input
+        id="sellId"
+        class="scan__input"
+        type="text"
+        inputmode="numeric"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="Введите номер…">
+      <button type="button" id="paySearch" class="scan__btn">Найти</button>
+    </div>
+    <p id="payHint" class="note note--left">
+      Введите номер продажи (№ из чека или списка продаж) и нажмите Enter или «Найти».
+      Откроется карточка продажи, в ней можно сменить способ оплаты.
+    </p>
+
+    <!-- Only when the tenant has no GET /sells/{id}: the list needs a day. -->
+    <div id="dateRow" class="daterow" hidden>
+      <span>Дата продажи</span>
+      <input id="sellDate" type="date" aria-label="Дата продажи">
+    </div>
+
+    <div id="payStatus" hidden></div>
+
+    <div id="payDone" class="banner" hidden>
+      <span class="banner__i banner__i--ok">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6.5L9 17.5l-5-5"/></svg>
+      </span>
+      <div>
+        <div id="payDoneTitle" class="banner__t"></div>
+        <div id="payDoneSub" class="banner__s"></div>
+      </div>
+    </div>
+
+    <!-- Sell card, filled via textContent only. -->
+    <section id="payCard" hidden>
+      <div id="payFacts" class="group" style="margin-top: 22px"></div>
+
+      <div id="payChange">
+        <p class="sect"><span>Новый способ оплаты</span></p>
+        <!-- Раздельная оплата: один селект на строку + «все сразу». Скрыт при одной строке. -->
+        <div id="payAllRow" class="payrow payrow--all" hidden>
+          <span class="payrow__l">Все оплаты сразу</span>
+          <select id="payAll" class="sel sel--row" aria-label="Все оплаты сразу"></select>
+        </div>
+        <div id="payMethods"></div>
+
+        <p class="sect"><span>Причина</span></p>
+        <textarea id="payReason" class="reason" rows="2" placeholder="Почему меняем"></textarea>
+
+        <button type="button" id="paySubmit" class="cta" disabled>Изменить оплату</button>
+
+        <!-- Second step. Nothing is written until «Да, изменить». -->
+        <div id="payConfirm" class="confirm" hidden>
+          <p id="payConfirmTitle" class="confirm__t"></p>
+          <p id="payConfirmSub" class="confirm__s"></p>
+          <button type="button" id="payConfirmYes" class="cta cta--danger">Да, изменить</button>
+          <button type="button" id="payConfirmNo" class="cta cta--plain">Отмена</button>
+        </div>
+        <p class="note">Enter — найти · Изменение подтверждается вторым нажатием</p>
+      </div>
+    </section>
+
+    <section class="log">
+      <p class="sect"><span>Журнал</span><span id="payLogCount" class="sect__count">0</span></p>
+      <ul id="payLogList" class="list"></ul>
+      <p id="payLogEmpty" class="note note--left">Изменений пока нет</p>
+    </section>
+  </div><!-- /payView -->
+
+</main>
+
+<script src="profiles.js"></script>
+<script src="panel.js"></script>
+<script src="payment.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Never commit the private key used to generate the manifest "key"
+*.pem
+*.crx
+
+# Packaged builds
+dist/
+*.zip

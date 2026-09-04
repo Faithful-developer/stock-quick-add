@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stock Quick Add — настройки</title>
+  <link rel="stylesheet" href="options.css">
+  <style>
+    /* The options page is a normal tab, not a 350px panel. */
+    body { max-width: 540px; padding: 20px; }
+    h1 { margin: 0 0 4px; font-size: 18px; }
+    h2 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase;
+         letter-spacing: .02em; color: var(--muted); }
+    .hint { margin: 0 0 18px; font-size: 12px; color: var(--muted); }
+    .field { margin-bottom: 14px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row .btn { width: auto; min-width: 120px; }
+    .split { display: flex; gap: 10px; }
+    .split select { flex: 0 0 110px; }
+    .split input { flex: 1; }
+    /* Domain names need more room than an HTTP verb. */
+    .split--host select { flex: 0 0 150px; }
+    /* The account picker wants the opposite weighting: wide list, small button. */
+    .split--profile select { flex: 1; }
+    .split--profile .btn { flex: 0 0 auto; width: auto; min-width: 96px; }
+    .msg { margin: 12px 0 0; font-size: 12px; font-weight: 600; }
+    .msg--ok { color: var(--ok); }
+    .msg--err { color: var(--err); }
+    .divider { margin: 24px 0 18px; border: 0; border-top: 1px solid var(--line); }
+    .shortcut { display: flex; gap: 10px; align-items: center; }
+    .shortcut__value {
+      flex: 1; padding: 8px 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px; background: var(--row);
+      border: 1px solid var(--line); border-radius: 6px;
+    }
+    .shortcut__value--empty { color: var(--err); font-family: inherit; font-size: 13px; }
+    .shortcut .btn { width: auto; min-height: 36px; }
+    .danger { color: var(--err); border-color: var(--err); }
+    .check { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+    .check input { width: 18px; height: 18px; accent-color: var(--accent); }
+    .jtable { width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 12px; }
+    .jtable th, .jtable td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    .jtable th { color: var(--muted); font-weight: 600; }
+    .jtable td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  </style>
+</head>
+<body>
+
+<h1>Stock Quick Add</h1>
+<p class="hint">Данные хранятся локально в этом браузере (chrome.storage.local) и никуда больше не отправляются.</p>
+
+<h2>Аккаунты</h2>
+
+<div class="field">
+  <label class="label" for="profileList">Профиль</label>
+  <div class="split split--profile">
+    <select id="profileList" class="input"></select>
+    <button type="button" id="addProfile" class="btn">Новый</button>
+  </div>
+  <p class="field__hint">
+    Каждый аккаунт ox-sys — отдельный профиль со своим субдоменом, токеном и локацией.
+    Переключаются прямо в панели. Незаконченные правки сохраняются при переключении между профилями.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="name">Название</label>
+  <input id="name" class="input" type="text" autocomplete="off" placeholder="TeXno">
+  <p class="field__hint">Видно в списке и в панели. Если пусто — показывается субдомен.</p>
+</div>
+
+<div class="field">
+  <label class="label" for="subdomain">Субдомен и домен</label>
+  <div class="split split--host">
+    <input id="subdomain" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="urolbek">
+    <select id="domain" class="input">
+      <option value="ox-sys.com">.ox-sys.com</option>
+      <option value="oxapp.io">.oxapp.io</option>
+    </select>
+  </div>
+  <p class="field__hint">
+    Адрес API: https://<b id="preview">&lt;субдомен&gt;.ox-sys.com</b><br>
+    Можно вставить и полный адрес из строки браузера — домен определится сам.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="token">Токен</label>
+  <input id="token" class="input" type="password" autocomplete="off" spellcheck="false" placeholder="вставьте токен">
+  <p class="field__hint">
+    Cookie не требуется — достаточно токена. Токен хранится на этом компьютере
+    в открытом виде: если тенант позволяет, используйте отдельный API-ключ,
+    а не токен веб-сессии.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="authScheme">Способ авторизации</label>
+  <select id="authScheme" class="input">
+    <option value="auto">Авто — по виду токена</option>
+    <option value="bearer">Authorization: Bearer</option>
+    <option value="auth-token">auth-token</option>
+  </select>
+  <p class="field__hint">
+    JWT из веб-приложения принимается только как <code>Bearer</code>; тот же токен
+    в заголовке <code>auth-token</code> даёт 401. Статический ключ — наоборот.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="location">Локация (склад)</label>
+  <!-- A tenant can hold a hundred warehouses; the name is faster typed than
+       scrolled to. Narrows the list below without ever hiding what is chosen. -->
+  <input id="locationSearch" class="input input--search" type="search"
+         autocomplete="off" spellcheck="false" placeholder="Поиск по названию">
+  <select id="location" class="input" size="1">
+    <option value="">— не указывать —</option>
+  </select>
+  <p class="field__hint" id="locationHint">Список загружается после сохранения доступа.</p>
+  <p class="field__hint">Локация по умолчанию: предвыбирается в панели, если у товара есть на ней остаток.</p>
+</div>
+
+<div class="row">
+  <button type="button" id="save" class="btn btn--primary">Сохранить</button>
+  <button type="button" id="test" class="btn">Проверить связь</button>
+  <button type="button" id="remove" class="btn danger">Удалить профиль</button>
+</div>
+
+<p id="msg" class="msg" hidden></p>
+
+<hr class="divider">
+
+<h2>Endpoint коррекции остатка</h2>
+
+<div class="field">
+  <label class="label" for="stockPath">Метод и путь</label>
+  <div class="split">
+    <select id="stockMethod" class="input">
+      <option value="POST">POST</option>
+      <option value="PATCH">PATCH</option>
+      <option value="PUT">PUT</option>
+    </select>
+    <input id="stockPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/corrections">
+  </div>
+  <p class="field__hint">
+    По умолчанию <code>POST /corrections</code> — подтверждено на живом API.
+    Количество прибавляется к остатку выбранной партии, а не заменяет его.
+    Панель делает два запроса: создаёт коррекцию и сразу подтверждает её через
+    <code>POST /corrections/&lt;id&gt;/approve</code> — без подтверждения остаток не меняется.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="reason">Причина коррекции</label>
+  <input id="reason" class="input" type="text" autocomplete="off" placeholder="Другое">
+  <p class="field__hint">Попадает в поле <code>reason</code> и видно в истории коррекций ox-sys.</p>
+</div>
+
+<hr class="divider">
+
+<h2>Смена оплаты</h2>
+
+<div class="field">
+  <label class="label" for="sellPath">Продажа по номеру</label>
+  <input id="sellPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/sells/{id}">
+  <p class="field__hint">
+    <code>GET</code>, <code>{id}</code> — номер продажи. Маршрут подтверждён на живом хосте.
+    Если сервер отвечает 405, панель сама переходит на поиск по списку за дату.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="sellPatchPath">Запись изменения</label>
+  <input id="sellPatchPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/sells/{id}/patch">
+  <p class="field__hint">
+    <code>PATCH</code>. Тело собирается из ответа продажи целиком, меняется только
+    <code>payments[].paymentMethod</code>; раздельная оплата не трогается.
+  </p>
+</div>
+
+<div class="field">
+  <label class="label" for="paymentMethodsPath">Способы оплаты</label>
+  <input id="paymentMethodsPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/payment-methods">
+  <p class="field__hint">Список для выпадающего меню. Если недоступен — подписи берутся из самой продажи.</p>
+</div>
+
+<div class="field">
+  <label class="label" for="sellsListPath">Список продаж (запасной поиск)</label>
+  <input id="sellsListPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/sells-list">
+  <p class="field__hint">Используется только когда продажа по номеру недоступна.</p>
+</div>
+
+<hr class="divider">
+
+<h2>Журнал Stock</h2>
+
+<div class="field">
+  <div class="row">
+    <span id="stockLogSummary" class="field__hint" style="margin:0">Операций пока нет.</span>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button type="button" id="stockLogExport" class="btn">Скачать CSV</button>
+    <button type="button" id="stockLogClear" class="btn danger">Очистить журнал</button>
+  </div>
+  <p class="field__hint">
+    Последние 500 коррекций остатка: время, аккаунт, товар, количество (минус — откат),
+    склад, номер коррекции. Журнал общий для всех профилей и хранится только в этом браузере.
+  </p>
+  <table id="stockLogTable" class="jtable" hidden>
+    <thead><tr><th>Когда</th><th>Аккаунт</th><th>Товар</th><th>Кол-во</th><th>Склад</th><th>Коррекция</th></tr></thead>
+    <tbody id="stockLogBody"></tbody>
+  </table>
+</div>
+
+<hr class="divider">
+
+<h2>Журнал смены оплаты</h2>
+
+<div class="field">
+  <div class="row">
+    <span id="payLogSummary" class="field__hint" style="margin:0">Изменений пока нет.</span>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button type="button" id="payLogExport" class="btn">Скачать CSV</button>
+    <button type="button" id="payLogClear" class="btn danger">Очистить журнал</button>
+  </div>
+  <p class="field__hint">
+    Последние 500 изменений: время, аккаунт, продажа, было → стало, сумма, причина.
+    CSV с BOM — Excel открывает кириллицу без танцев. Журнал общий для всех профилей
+    и хранится только в этом браузере.
+  </p>
+  <table id="payLogTable" class="jtable" hidden>
+    <thead><tr><th>Когда</th><th>Аккаунт</th><th>Продажа</th><th>Было → стало</th><th>Сумма</th><th>Причина</th></tr></thead>
+    <tbody id="payLogBody"></tbody>
+  </table>
+</div>
+
+<hr class="divider">
+
+<h2>Звук</h2>
+
+<div class="field">
+  <label class="check">
+    <input type="checkbox" id="sound">
+    <span>Звуковой сигнал при добавлении, отмене и ошибке</span>
+  </label>
+  <p class="field__hint">
+    Разные тоны для успеха, отмены и ошибки — чтобы не смотреть на экран во время приёмки.
+    Настройка общая для всех аккаунтов и сохраняется сразу.
+  </p>
+</div>
+
+<hr class="divider">
+
+<h2>Горячая клавиша</h2>
+
+<div class="field">
+  <div class="shortcut">
+    <code id="shortcutValue" class="shortcut__value">—</code>
+    <button type="button" id="editShortcut" class="btn">Изменить</button>
+  </div>
+  <p class="field__hint">
+    Открывает боковую панель. Одна на все профили — расширение не может назначить
+    сочетание само, кнопка открывает страницу Chrome, где его можно изменить.
+  </p>
+</div>
+
+<script src="profiles.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

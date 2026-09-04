@@ -1,0 +1,479 @@
+/* Side panel, ~350px. iOS idiom: grouped inset lists on a grey ground,
+   system colours, 44pt rows. Values follow the platform's own scale rather
+   than a 4/8px grid, hence the 10px radii and half-pixel separators. */
+
+:root {
+  --bg: #f2f2f7;              /* systemGroupedBackground */
+  --card: #ffffff;            /* secondarySystemGroupedBackground */
+  --label: #000000;
+  --label2: rgba(60, 60, 67, .60);
+  --sep: rgba(60, 60, 67, .29);
+  --fill: rgba(118, 118, 128, .12);
+  --blue: #007aff;
+  --green: #34c759;
+  --red: #ff3b30;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --label: #ffffff;
+    --label2: rgba(235, 235, 245, .60);
+    --sep: rgba(84, 84, 88, .65);
+    --fill: rgba(118, 118, 128, .24);
+    --blue: #0a84ff;
+    --green: #30d158;
+    --red: #ff453a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+/* MUST outrank every display: rule below. `[hidden]` from the UA stylesheet is
+   specificity 0-1-0, exactly the same as a class, so `.banner { display: grid }`
+   silently beat it on source order and hidden elements kept rendering. */
+[hidden] { display: none !important; }
+
+/* The panel is resizable, so horizontal rhythm scales with it rather than
+   sitting at a fixed 16px that crowds a narrow panel and strands a wide one. */
+:root {
+  --pad: clamp(12px, 4vw, 16px);
+}
+
+body {
+  margin: 0;
+  padding: 0 0 24px;
+  /* -apple-system resolves to SF on Apple platforms; the rest is fallback. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.29;
+  letter-spacing: -.41px;
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+  color: var(--label);
+  /* The panel is a narrow column; nothing in it may scroll sideways. */
+  overflow-x: hidden;
+}
+
+button { font: inherit; letter-spacing: inherit; }
+
+/* Dragged wide, the panel would otherwise stretch one 17px column across
+   700px, which reads as a broken layout rather than a roomy one. */
+#app,
+#setup {
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* --- nav bar + title --- */
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 44px;
+  padding: 0 var(--pad);
+}
+
+/* The account name is the visible control; a transparent native select sits on
+   top of it, so switching is a real menu with no custom popup code. */
+.acct {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+.acct__name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.acct__chev { flex: 0 0 auto; color: var(--label2); }
+.acct__select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.acct--single .acct__chev,
+.acct--single .acct__select { display: none; }
+
+.navbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  color: var(--blue);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.h1 {
+  margin: 0 var(--pad) 14px;
+  /* A 34px title is right at 390px and absurd at 280px. */
+  font-size: clamp(26px, 8vw, 34px);
+  font-weight: 700;
+  letter-spacing: .37px;
+  line-height: 1.06;
+}
+
+/* --- scan field --- */
+
+.scan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  margin: 0 var(--pad);
+  padding: 0 12px;
+  color: var(--label2);
+  background: var(--fill);
+  border-radius: 10px;
+}
+.scan:focus-within { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 24%, transparent); }
+.scan__icon { flex: 0 0 auto; }
+.scan__input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  letter-spacing: .02em;
+  color: var(--label);
+  background: none;
+  border: 0;
+  outline: none;
+}
+.scan__input::placeholder {
+  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  letter-spacing: -.41px;
+  color: var(--label2);
+}
+
+/* --- grouped lists --- */
+
+.sect {
+  display: flex;
+  justify-content: space-between;
+  margin: 22px var(--pad) 7px;
+  font-size: 13px;
+  letter-spacing: -.08px;
+  text-transform: uppercase;
+  color: var(--label2);
+}
+.sect__count { font-variant-numeric: tabular-nums; }
+
+.group {
+  margin: 0 var(--pad);
+  background: var(--card);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px var(--pad);
+  font: inherit;
+  text-align: left;
+  color: var(--label);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+/* Hairline inset to the text edge, the way a grouped table view draws it. */
+.row + .row::before,
+.row + .stock::before {
+  content: "";
+  position: absolute;
+  left: var(--pad);
+  right: 0;
+  top: 0;
+  height: 1px;
+  transform: scaleY(.5);
+  background: var(--sep);
+}
+.row--static { cursor: default; }
+.row:not(.row--static):not(:disabled):active { background: var(--fill); }
+/* Wraps to its own line rather than overflowing when the value is long. */
+.row__v {
+  margin-left: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--label2);
+  overflow-wrap: anywhere;
+}
+.row > span:first-child { min-width: 0; }
+.row:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Menu row: the chosen value plus a chevron. Tapping it expands the picker
+   below, rather than opening a platform menu — a hundred warehouses in a native
+   <select> is a scroll hunt, and the name is faster typed than found. */
+.row--menu { cursor: pointer; }
+.row--menu .row__v { color: var(--blue); font-weight: 600; }
+.row__chev {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: 2px;
+  color: var(--label2);
+  transition: transform .15s ease;
+}
+.row--menu[aria-expanded="true"] .row__chev { transform: rotate(180deg); }
+.row--empty { color: var(--label2); }
+.row--empty .row__chev { display: none; }
+
+/* --- location picker --- */
+
+.picker {
+  position: relative;
+  border-top: 1px solid var(--sep);
+}
+.picker__input {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px var(--pad);
+  font: inherit;
+  color: var(--label);
+  background: var(--fill);
+  border: 0;
+  outline: 0;
+}
+.picker__input::placeholder { color: var(--label2); }
+.picker__input:focus { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 30%, transparent); }
+
+/* Caps at roughly five rows: long enough to scan, short enough that the submit
+   button stays on screen while the picker is open. */
+.picker__list {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.picker__opt { min-height: 42px; }
+.picker__opt--on { color: var(--blue); font-weight: 600; }
+.picker__opt--on .row__v { color: var(--blue); }
+.picker__empty { margin: 12px var(--pad); }
+
+/* --- product --- */
+
+.prod { padding: 14px var(--pad) 12px; }
+.prod__n {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.45px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.prod__v { margin-top: 2px; font-size: 15px; color: var(--label2); overflow-wrap: anywhere; }
+
+.stock {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 12px var(--pad);
+}
+.stock__l { font-size: 15px; color: var(--label2); }
+.stock__v {
+  font-size: clamp(22px, 6.5vw, 28px);
+  font-weight: 700;
+  letter-spacing: .36px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- quantity stepper --- */
+
+.stepper {
+  display: grid;
+  /* minmax(0, 1fr), not 1fr: a bare 1fr track cannot shrink below the number
+     input's intrinsic width, which pushed the + button off the panel edge. */
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+  align-items: center;
+  margin: 0 var(--pad);
+  height: 52px;
+  background: var(--card);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.stepper__b {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--blue);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.stepper__b:active { background: var(--fill); }
+.stepper__v {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--label);
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--sep);
+  border-right: 1px solid var(--sep);
+  outline: none;
+  -moz-appearance: textfield;
+}
+.stepper__v::-webkit-outer-spin-button,
+.stepper__v::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* --- buttons --- */
+
+.cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* A <button> is a form control: `width: auto` shrinks to its text even as a
+     block-level flex container, so the width has to be stated outright. */
+  width: calc(100% - var(--pad) * 2);
+  height: 50px;
+  margin: 22px var(--pad) 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--blue);
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.cta--plain { color: var(--blue); background: var(--card); }
+.cta:not(:disabled):active { filter: brightness(.92); }
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--blue);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.cta:disabled,
+.link:disabled,
+.row:disabled,
+.stepper__b:disabled { opacity: .4; cursor: not-allowed; }
+
+.cta:focus-visible,
+.link:focus-visible,
+.row:focus-visible,
+.navbtn:focus-visible,
+.stepper__b:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.note {
+  margin: 10px var(--pad) 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--label2);
+  text-align: center;
+}
+.note--left { text-align: left; }
+
+/* --- banners: success and errors --- */
+
+.banner {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  margin: 16px var(--pad);
+  padding: 14px var(--pad);
+  background: var(--card);
+  border-radius: 10px;
+}
+.banner__i {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  border-radius: 50%;
+}
+.banner__i--ok { background: var(--green); }
+.banner__i--err { background: var(--red); }
+.banner__t { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.banner__t:empty,
+.banner__s:empty { display: none; }
+.banner__s {
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--label2);
+  overflow-wrap: anywhere;
+}
+.banner__a { display: flex; gap: 18px; margin-top: 10px; }
+
+/* --- session log --- */
+
+.list {
+  margin: 0 var(--pad);
+  padding: 0;
+  list-style: none;
+  background: var(--card);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.li {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px var(--pad);
+}
+.li + .li::before {
+  content: "";
+  position: absolute;
+  left: var(--pad);
+  right: 0;
+  top: 0;
+  height: 1px;
+  transform: scaleY(.5);
+  background: var(--sep);
+}
+.li__n { font-size: 15px; overflow-wrap: anywhere; }
+.li__m { margin-top: 1px; font-size: 13px; color: var(--label2); }
+.li__q {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+.li__q--neg { color: var(--red); }
+
+/* --- setup prompt --- */
+
+.setup { padding: 48px var(--pad); text-align: center; }
+.setup__text { margin: 0 0 18px; font-size: 15px; color: var(--label2); }
+.setup .cta { width: 100%; margin: 0; }

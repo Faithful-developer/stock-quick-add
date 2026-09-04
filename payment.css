@@ -1,0 +1,259 @@
+/* Смена способа оплаты — только то, чего нет в panel.css.
+   Всё остальное (.group, .row, .sect, .cta, .banner, .list, .li) переиспользуется,
+   поэтому обе вкладки выглядят одинаково и правятся в одном месте. */
+
+/* Переключатель инструментов. Сегментированный контрол, как в iOS. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 var(--pad) 4px;
+  padding: 2px;
+  background: var(--fill);
+  border-radius: 9px;
+}
+
+.tab {
+  flex: 1;
+  min-height: 30px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--label);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Выбранная вкладка — синяя, чтобы было видно, какой инструмент открыт.
+   Днём — мягкая голубая подложка, синий текст и полоска снизу: на светлом
+   экране сплошная заливка кричит. Ночью — сплошной синий с белым текстом:
+   на чёрном фоне заливка читается лучше, чем тонкая полоска. */
+.tab {
+  position: relative;
+  transition: background .15s ease, color .15s ease;
+}
+
+.tab--on {
+  background: color-mix(in srgb, var(--blue) 14%, var(--card));
+  color: var(--blue);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .10);
+}
+
+.tab--on::after {
+  content: "";
+  position: absolute;
+  left: 22%;
+  right: 22%;
+  bottom: 3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--blue);
+}
+
+.tab:not(.tab--on):hover { color: var(--blue); }
+
+@media (prefers-color-scheme: dark) {
+  .tab--on {
+    background: var(--blue);
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+  }
+  .tab--on::after { display: none; }
+  .tab:not(.tab--on):hover { color: #fff; }
+}
+
+.tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 40%, transparent);
+}
+
+/* Поле номера продажи. В отличие от сканера штрихкода, сюда печатают руками,
+   поэтому оно выглядит как настоящее поле ввода — с рамкой и кнопкой. */
+.scan--pay {
+  background: var(--card);
+  border: 1.5px solid var(--blue);
+  color: var(--blue);
+}
+
+.scan--pay .scan__input::placeholder { color: var(--label2); }
+
+.scan__btn {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scan__btn:disabled { opacity: .4; cursor: default; }
+
+.scan__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 40%, transparent);
+}
+
+/* При переходе на вкладку поле дважды «вспыхивает», чтобы было видно, куда печатать. */
+@keyframes scan-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 50%, transparent); }
+  100% { box-shadow: 0 0 0 12px transparent; }
+}
+
+.scan--pulse { animation: scan-pulse .8s ease-out 2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .scan--pulse { animation: none; }
+}
+
+/* Родной select: платформенное меню вместо самодельного списка. */
+.sel {
+  width: calc(100% - var(--pad) * 2);
+  margin: 0 var(--pad);
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--label);
+  font: inherit;
+  font-size: 17px;
+}
+
+.sel:disabled { opacity: .4; }
+
+.sel:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 40%, transparent);
+}
+
+/* Строка «текущая оплата → селект нового способа». По одной на каждую оплату. */
+.payrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px var(--pad) 0;
+  /* Строка не шире панели: селект с длинным названием способа иначе
+     вытягивает страницу вбок и появляется горизонтальная прокрутка. */
+  max-width: calc(100% - var(--pad) * 2);
+  min-width: 0;
+}
+
+.payrow__l {
+  flex: 0 1 42%;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.25;
+  color: var(--label2);
+  overflow-wrap: anywhere;
+}
+
+.payrow__l b { color: var(--label); font-weight: 600; }
+
+.payrow--all { margin-bottom: 10px; }
+.payrow--all .payrow__l { color: var(--blue); font-weight: 600; }
+
+.sel--row {
+  /* flex-элемент не ужимается ниже ширины самого длинного пункта, пока
+     min-width не сброшен; basis 0 отдаёт ему ровно оставшееся место. */
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  text-overflow: ellipsis;
+}
+
+/* Причина — обязательное поле, поэтому выглядит как поле ввода, а не как подпись. */
+.reason {
+  display: block;
+  width: calc(100% - var(--pad) * 2);
+  margin: 0 var(--pad);
+  padding: 11px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--label);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.35;
+  resize: vertical;
+}
+
+.reason::placeholder { color: var(--label2); }
+
+.reason:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 40%, transparent);
+}
+
+/* Второй шаг: пока этот блок не показан, ничего не отправлено. */
+.confirm {
+  margin: 14px var(--pad) 0;
+  padding: 12px 14px;
+  border: 1.5px solid var(--red);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.confirm__t {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.confirm__s {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--label2);
+  overflow-wrap: anywhere;
+}
+
+.confirm .cta { margin-top: 12px; }
+
+.cta--danger { background: var(--red); color: #fff; }
+
+/* Раздельная оплата: не ошибка, но и не то, что панель имеет право трогать. */
+.warn {
+  margin: 14px var(--pad) 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--red) 12%, var(--card));
+  color: var(--label);
+  font-size: 14px;
+}
+
+.warn__t { font-weight: 600; }
+
+.warn ul { margin: 8px 0 0; padding-left: 18px; }
+
+.warn li { margin-top: 2px; }
+
+/* Дата нужна только когда прямой поиск по id недоступен (см. API_NOTES.md). */
+.daterow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px var(--pad) 0;
+}
+
+.daterow input {
+  flex: 1;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--label);
+  font: inherit;
+  font-size: 16px;
+}
+
+.daterow span { font-size: 14px; color: var(--label2); }

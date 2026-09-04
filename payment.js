@@ -110,6 +110,7 @@ let pmMethods = [];       // [{ id, name }]
 let pmMethodsFor = '';    // id профиля, для которого загружен список
 let pmArmed = false;      // показан блок подтверждения
 let pmBusy = false;
+externalBusy = () => pmBusy;
 let pmProfile = null;     // профиль, захваченный на время операции (см. pmGet)
 let pmReloadPending = false; // профиль сменился во время записи; применить после
 let pmLog = [];           // последние записи журнала, для списка в панели
@@ -752,10 +753,9 @@ function pmSetBusy(busy) {
   pel.confirmYes.disabled = busy;
   pel.confirmNo.disabled = busy;
   pel.tabStock.disabled = busy;
-  // Переключатель аккаунтов общий с приёмом; на время записи он заперт,
-  // а после — возвращается в то состояние, которое ему задаёт panel.js.
-  if (busy) pel.profile.disabled = true;
-  else pel.profile.disabled = profiles.length < 2;
+  // Переключатель аккаунтов общий с приёмом: panel.js считает его состояние
+  // по обоим инструментам и числу профилей (см. syncProfileSwitcher).
+  syncProfileSwitcher();
   pmUpdateSubmit();
 
   // Смена профиля, пришедшая во время запроса, применяется только теперь.

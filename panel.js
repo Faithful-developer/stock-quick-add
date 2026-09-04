@@ -803,6 +803,21 @@ function selectedLot(product) {
   return product.lots.find((l) => l.id === selectedLotId) || null;
 }
 
+// The payment tool has its own busy flag; it registers a getter here so the
+// switcher lock can consider both tools without panel.js knowing pmBusy.
+let externalBusy = () => false;
+
+/**
+ * The switcher's disabled state depends on the profile count AND on whether
+ * either tool is mid-request. It must be recomputed whenever any of those
+ * change: a second company added while the panel sits open does not change
+ * the active account, so the reload path never runs, and a select left
+ * disabled by an earlier request would ignore every click.
+ */
+function syncProfileSwitcher() {
+  el.profile.disabled = inFlight || externalBusy() || profiles.length < 2;
+}
+
 /** The switcher is a transparent select over the name; hidden with one account. */
 function renderProfiles() {
   el.profile.textContent = '';
@@ -819,6 +834,7 @@ function renderProfiles() {
     el.profileName.textContent = profileLabel(settings);
   }
   el.acct.classList.toggle('acct--single', profiles.length < 2);
+  syncProfileSwitcher();
 }
 
 function focusBarcode() {
@@ -872,7 +888,7 @@ function setBusy(busy) {
   const noLot = Boolean(currentProduct) && !selectedLotId;
 
   el.barcode.disabled = busy;
-  el.profile.disabled = busy || profiles.length < 2;
+  syncProfileSwitcher();
   const picker = el.locs.querySelector('.row--menu');
   if (picker) picker.disabled = busy || !selectedLotId;
   el.qty.disabled = busy;

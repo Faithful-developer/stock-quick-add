@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Stock Quick Add",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxb52SKlUNaiO0QzXpmZ5khty1EzpB7DIKMriEfFGOHQk60xmP/jCWF2MRnbagerQ5ir/A6y7nWlgsqmOwIhzT+p4L9U6uvxkm1eXWLx0sS0jrYRu6uqsJhjEEDgdr/N4/Obydvi0Fsp7EklK+nvKIai4+4r/ZguP/oqBeinb1mLwKkAEmhMQP2JVyk5vEEjHKdB0i6qpX8j+EK6ZAvjL9t5cokocN7tcmFME7TMj1Ey8EUoLZgls+kTA3ZLRvoOQZW4kvZ9+EO4Vcncm4vDgd9rWmiulFlUzTdHCWW6SIr6w1+al0o0pP5ljUhct5MIhsPoEiAVSmwhWveqfGn+zCwIDAQAB",
   "description": "Приём остатков по штрихкоду и смена способа оплаты продажи — в боковой панели.",
   "minimum_chrome_version": "116",

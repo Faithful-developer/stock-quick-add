@@ -12,7 +12,7 @@ Extension ID (закреплён через `key` в манифесте): `hnmnp
    если папку удалить, расширение перестанет работать.
 
    ```bash
-   git clone REPO_URL ~/stock-quick-add
+   git clone https://github.com/Faithful-developer/stock-quick-add.git ~/stock-quick-add
    ```
 
 3. На `chrome://extensions` нажмите **Load unpacked** и выберите папку `~/stock-quick-add`

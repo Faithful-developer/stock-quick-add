@@ -265,6 +265,17 @@ button { font: inherit; letter-spacing: inherit; }
 .picker__opt--on .row__v { color: var(--blue); }
 .picker__empty { margin: 12px var(--pad); }
 
+/* --- partial barcode matches --- */
+
+.matches__list {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.matches__code { font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace; }
+.matches__code b { color: var(--label); font-weight: 700; }
+.picker__opt--on .matches__code b { color: inherit; }
+
 /* --- product --- */
 
 .prod { padding: 14px var(--pad) 12px; }

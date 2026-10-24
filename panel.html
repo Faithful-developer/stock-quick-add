@@ -49,7 +49,7 @@
       autocomplete="off"
       autocorrect="off"
       spellcheck="false"
-      placeholder="Отсканируйте штрихкод">
+      placeholder="Штрихкод или его часть">
   </div>
 
   <!-- Errors and progress. Rendered as a banner when it carries a failure. -->
@@ -72,6 +72,13 @@
       </div>
     </div>
   </div>
+
+  <!-- Several products contain the typed digits; the operator picks one. -->
+  <section id="matches" hidden>
+    <p class="sect"><span id="matchesTitle"></span><span id="matchesCount" class="sect__count"></span></p>
+    <div id="matchesList" class="group matches__list"></div>
+    <p id="matchesHint" class="note note--left"></p>
+  </section>
 
   <!-- Product card, filled via textContent only. -->
   <section id="card" hidden>

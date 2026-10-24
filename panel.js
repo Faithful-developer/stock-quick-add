@@ -9,6 +9,7 @@
  * API shapes below were verified against a live ox-sys tenant:
  *   GET /variations?page=1&size=10&barcode=<code>
  *     -> { items: [...], total_count: n, page: 1 }
+ *     `barcode` matches anywhere in the code, and needs at least 3 characters.
  *   item -> { id, name, productName, sku, barcode, unit,
  *             stocks: [ { id: <uuid>, count, location, sellPrice: {...} } ] }
  *
@@ -40,11 +41,16 @@ const STOCK_LOG_SHOWN = 20;
 // No real receipt is this large, and a barcode typed into the quantity box is.
 const MAX_QTY = 10000;
 
+// Below this the server's barcode filter returns nothing at all.
+const MIN_QUERY = 3;
+
 // --- state -------------------------------------------------------------------
 
 let settings = null;       // the active profile (see profiles.js)
 let profiles = [];         // every configured account, for the switcher
 let currentProduct = null; // normalised product from the last successful search
+let lastQuery = '';        // the code that opened the card; typing it again counts +1
+let matchList = null;      // { products, index, query } while a partial code is being resolved
 let selectedLotId = '';    // the lot a correction would be written against
 let pickerOpen = false;    // the location picker is expanded
 let pickerQuery = '';      // what has been typed into its search field
@@ -72,6 +78,11 @@ const el = {
   doneTitle: document.getElementById('doneTitle'),
   doneSub: document.getElementById('doneSub'),
   undo: document.getElementById('undo'),
+  matches: document.getElementById('matches'),
+  matchesTitle: document.getElementById('matchesTitle'),
+  matchesCount: document.getElementById('matchesCount'),
+  matchesList: document.getElementById('matchesList'),
+  matchesHint: document.getElementById('matchesHint'),
   card: document.getElementById('card'),
   pName: document.getElementById('pName'),
   pVariation: document.getElementById('pVariation'),
@@ -319,20 +330,29 @@ function lotPrice(lot) {
 }
 
 /**
- * The API's `barcode` filter is a PREFIX match: a truncated scan such as
- * "478000000022" still returns the product ending in "...229". Re-check the
- * barcode locally so a mis-scan can never silently resolve to the wrong item.
+ * The API's `barcode` filter is a SUBSTRING match, verified against a live
+ * tenant: "345268" and "35133" both return "4783513345268". So a part of the
+ * code typed by hand costs the same single request as a full scan.
+ *
+ * A full scan resolves to its exact match. Anything else comes back as
+ * `partial` for the operator to confirm — a scanner that dropped a digit lands
+ * there too, and must never be mistaken for an exact hit.
  */
-function selectExactMatch(items, code) {
+function selectMatches(json, code) {
+  const items = json && Array.isArray(json.items) ? json.items : [];
   const exact = items.filter((i) => String(i.barcode || '').trim() === code);
   if (exact.length === 1) return { product: normalizeProduct(exact[0]) };
-  if (exact.length > 1) return { ambiguous: exact.length };
 
-  // A full page of prefix matches with no exact one among them means the exact
-  // match may simply be on page 2. Saying "не найден" there would be a lie, and
-  // the operator would go looking for a product that is in the catalogue.
-  if (items.length >= Number(SEARCH_QUERY.size)) return { truncated: true };
-  return { none: true };
+  // Two products sharing one barcode are offered as a choice, like a partial.
+  // Otherwise the server's matches are re-checked against the code locally.
+  const found = exact.length
+    ? exact
+    : items.filter((i) => String(i.barcode || '').includes(code));
+  if (!found.length) return { none: true };
+
+  // total_count counts every match; only the first page is in hand.
+  const total = exact.length ? exact.length : Math.max(toNumber(json.total_count), found.length);
+  return { partial: found.map(normalizeProduct), total };
 }
 
 const numberFmt = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 });
@@ -541,9 +561,103 @@ function hideDone() {
 function hideCard() {
   el.card.hidden = true;
   currentProduct = null;
+  lastQuery = '';
   selectedLotId = '';
   pickerOpen = false;
   pickerQuery = '';
+  hideMatches();
+}
+
+function openProduct(product, query) {
+  hideMatches();
+  currentProduct = product;
+  lastQuery = query;
+  renderCard(product);
+}
+
+// --- partial matches ---------------------------------------------------------
+
+/**
+ * Several products contain the typed digits. Focus stays in the barcode field
+ * the whole time — the arrows move the highlight from there and Enter on the
+ * emptied field opens it — so a scan arriving now is still a new search.
+ */
+function showMatches(products, total, query) {
+  matchList = { products, index: 0, query };
+
+  el.matchesTitle.textContent = `Совпадения «${query}»`;
+  const more = total > products.length;
+  el.matchesCount.textContent = more
+    ? `${products.length} из ${formatNumber(total)}`
+    : String(products.length);
+  el.matchesHint.textContent = more
+    ? 'Показаны первые — введите больше цифр, чтобы сузить поиск'
+    : '↑ ↓ — выбор · Enter — открыть · Esc — отмена';
+
+  renderMatches();
+  el.matches.hidden = false;
+}
+
+function hideMatches() {
+  el.matches.hidden = true;
+  el.matchesList.textContent = '';
+  matchList = null;
+}
+
+function renderMatches() {
+  el.matchesList.textContent = '';
+  const { products, index, query } = matchList;
+
+  products.forEach((product, i) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'row picker__opt';
+    if (i === index) item.classList.add('picker__opt--on');
+
+    const label = document.createElement('span');
+    label.textContent = product.variation ? `${product.name} · ${product.variation}` : product.name;
+
+    item.append(label, markedBarcode(product.barcode, query));
+    item.addEventListener('click', () => pickMatch(i));
+    el.matchesList.appendChild(item);
+  });
+
+  const on = el.matchesList.children[index];
+  if (on) on.scrollIntoView({ block: 'nearest' });
+}
+
+/** The barcode with the typed digits in bold, so the operator sees why it matched. */
+function markedBarcode(barcode, query) {
+  const span = document.createElement('span');
+  span.className = 'row__v matches__code';
+
+  const at = barcode.indexOf(query);
+  if (at < 0) {
+    span.textContent = barcode || '—';
+    return span;
+  }
+
+  const hit = document.createElement('b');
+  hit.textContent = barcode.slice(at, at + query.length);
+  span.append(barcode.slice(0, at), hit, barcode.slice(at + query.length));
+  return span;
+}
+
+function moveMatch(delta) {
+  const last = matchList.products.length - 1;
+  matchList.index = Math.min(last, Math.max(0, matchList.index + delta));
+  renderMatches();
+}
+
+function pickMatch(i) {
+  if (inFlight || !matchList) return;
+  const product = matchList.products[i];
+  if (!product) return;
+
+  clearStatus();
+  openProduct(product, matchList.query);
+  // A click moved focus onto the row; the scanner needs it back.
+  focusBarcode();
 }
 
 function renderCard(product) {
@@ -1017,8 +1131,7 @@ async function searchByBarcode(code) {
   const res = await request(url.toString(), { method: 'GET' });
   if (!res.ok) throw httpError(res);
 
-  const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
-  return selectExactMatch(items, code);
+  return selectMatches(res.json, code);
 }
 
 /**
@@ -1161,18 +1274,28 @@ async function onBarcodeEnter() {
 
   const code = el.barcode.value.trim();
 
-  // Enter on an empty field commits the open card, so a whole item can be
-  // counted and filed without the operator ever leaving the scanner.
+  // Enter on an empty field opens the highlighted match, or commits the open
+  // card, so a whole item can be counted and filed without leaving the scanner.
   if (!code) {
-    if (currentProduct) onSubmit();
+    if (matchList) pickMatch(matchList.index);
+    else if (currentProduct) onSubmit();
     return;
   }
 
-  // Same code again: count another one instead of repeating the search.
-  if (currentProduct && code === currentProduct.barcode) {
+  // Same code again — scanned, or the same digits typed — counts another one
+  // instead of repeating the search.
+  if (currentProduct && (code === currentProduct.barcode || code === lastQuery)) {
     stepQty(1);
     el.barcode.value = '';
     beep('tick');
+    return;
+  }
+
+  // The server ignores shorter queries; say so instead of "не найден". The card
+  // stays: a stray keypress must not throw away an item already counted.
+  if (code.length < MIN_QUERY) {
+    showStatus(`Введите не меньше ${MIN_QUERY} цифр штрихкода`, true);
+    beep('err');
     return;
   }
 
@@ -1184,28 +1307,26 @@ async function onBarcodeEnter() {
   try {
     const result = await searchByBarcode(code);
 
-    if (result.ambiguous) {
-      // Keep the barcode so the operator can check it.
-      showStatus(`Найдено несколько товаров (${result.ambiguous}). Уточните штрихкод.`, true);
-      beep('err');
-      return;
-    }
-    if (result.truncated) {
-      showStatus('Слишком много совпадений по префиксу. Отсканируйте штрихкод полностью.', true);
-      beep('err');
-      return;
-    }
     if (result.none) {
       showStatus('Товар не найден', true);
       beep('err');
       return;
     }
 
-    clearStatus();
-    currentProduct = result.product;
-    renderCard(result.product);
+    if (result.product) {
+      clearStatus();
+      openProduct(result.product, code);
+    } else if (result.partial.length === 1) {
+      // Opened straight away, but labelled: a scanner that dropped a digit
+      // lands here too, and the operator should see it was not an exact hit.
+      openProduct(result.partial[0], code);
+      showStatus(`Найден по части штрихкода «${code}»`);
+    } else {
+      clearStatus();
+      showMatches(result.partial, result.total, code);
+    }
     // Cleared so the next scan is either a repeat (+1) or a different product;
-    // the code itself stays visible on the card.
+    // the code itself stays visible on the card or in the list title.
     el.barcode.value = '';
   } catch (err) {
     reportError(err);
@@ -1316,6 +1437,18 @@ async function onUndo() {
 function bindEvents() {
   // A USB scanner is just a keyboard: it types the code and sends Enter.
   el.barcode.addEventListener('keydown', (e) => {
+    // While partial matches are listed the arrows and Esc drive the list, so
+    // the caret never has to leave the field the scanner types into.
+    if (matchList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      moveMatch(e.key === 'ArrowDown' ? 1 : -1);
+      return;
+    }
+    if (matchList && e.key === 'Escape') {
+      e.preventDefault();
+      hideMatches();
+      return;
+    }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     onBarcodeEnter();

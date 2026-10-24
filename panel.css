@@ -12,6 +12,7 @@
   --blue: #007aff;
   --green: #34c759;
   --red: #ff3b30;
+  --orange: #ff9500;
   color-scheme: light dark;
 }
 
@@ -26,6 +27,7 @@
     --blue: #0a84ff;
     --green: #30d158;
     --red: #ff453a;
+    --orange: #ff9f0a;
   }
 }
 
@@ -76,6 +78,11 @@ button { font: inherit; letter-spacing: inherit; }
   gap: 8px;
   height: 44px;
   padding: 0 var(--pad);
+  /* Pinned, with .scanbar under it — see that rule. */
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: var(--bg);
 }
 
 /* The account name is the visible control; a transparent native select sits on
@@ -116,7 +123,8 @@ button { font: inherit; letter-spacing: inherit; }
 }
 
 .h1 {
-  margin: 0 var(--pad) 14px;
+  /* 6px here + the scanbar's 8px top padding = the old 14px gap. */
+  margin: 0 var(--pad) 6px;
   /* A 34px title is right at 390px and absurd at 280px. */
   font-size: clamp(26px, 8vw, 34px);
   font-weight: 700;
@@ -125,6 +133,17 @@ button { font: inherit; letter-spacing: inherit; }
 }
 
 /* --- scan field --- */
+
+/* Sticks under the nav, so the field the scanner types into is on screen however
+   far the journal is scrolled. Solid ground: .scan's own fill is translucent and
+   the list would show through it. */
+.scanbar {
+  position: sticky;
+  top: 44px;
+  z-index: 5;
+  padding: 8px 0;
+  background: var(--bg);
+}
 
 .scan {
   display: flex;
@@ -232,6 +251,9 @@ button { font: inherit; letter-spacing: inherit; }
 }
 .row--menu[aria-expanded="true"] .row__chev { transform: rotate(180deg); }
 .row--empty { color: var(--label2); }
+/* The account's default location had no lot and another one was preselected. */
+.row--warn { box-shadow: inset 3px 0 0 var(--orange); }
+.row--warn .row__v { color: var(--orange); }
 .row--empty .row__chev { display: none; }
 
 /* --- location picker --- */
@@ -409,6 +431,7 @@ button { font: inherit; letter-spacing: inherit; }
   text-align: center;
 }
 .note--left { text-align: left; }
+.note--warn { color: var(--orange); font-weight: 600; }
 
 /* --- banners: success and errors --- */
 
@@ -482,6 +505,9 @@ button { font: inherit; letter-spacing: inherit; }
   font-variant-numeric: tabular-nums;
 }
 .li__q--neg { color: var(--red); }
+/* A correction that may sit unapproved: the row that still needs a person. */
+.li__q--pending { color: var(--orange); }
+.li__w { margin-top: 2px; font-size: 13px; font-weight: 600; color: var(--orange); }
 
 /* --- setup prompt --- */
 

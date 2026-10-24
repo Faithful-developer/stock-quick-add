@@ -582,6 +582,8 @@ const stockJournal = makeJournal({
   columns: [
     ['at', 'timestamp'], ['profile', 'account'], ['host', 'host'], ['name', 'product'],
     ['quantity', 'quantity'], ['location', 'location'], ['correctionId', 'correction_id'],
+    // Empty for confirmed writes; 'pending' when the panel could not confirm one.
+    ['status', 'status'],
   ],
   row: (e) => [
     [new Date(e.at).toLocaleString('ru-RU'), 'num'],
@@ -589,7 +591,7 @@ const stockJournal = makeJournal({
     [e.name || '', ''],
     [e.quantity < 0 ? `−${Math.abs(e.quantity)}` : `+${e.quantity}`, 'num'],
     [e.location || '', ''],
-    [e.correctionId ? `№${e.correctionId}` : '', 'num'],
+    [(e.correctionId ? `№${e.correctionId}` : '') + (e.status === 'pending' ? ' ⚠ не подтверждена' : ''), 'num'],
   ],
   els: {
     summary: el.stockLogSummary, exportBtn: el.stockLogExport, clearBtn: el.stockLogClear,

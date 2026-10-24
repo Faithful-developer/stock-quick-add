@@ -22,6 +22,10 @@
  * location and its uuid; the panel makes the operator pick which.
  */
 
+// The panel is opened to scan, so it always starts at the barcode field — never
+// wherever the journal was last scrolled to.
+history.scrollRestoration = 'manual';
+
 // --- configuration -----------------------------------------------------------
 
 // Paths are relative to https://<subdomain>.ox-sys.com
@@ -52,6 +56,7 @@ let currentProduct = null; // normalised product from the last successful search
 let lastQuery = '';        // the code that opened the card; typing it again counts +1
 let matchList = null;      // { products, index, query } while a partial code is being resolved
 let selectedLotId = '';    // the lot a correction would be written against
+let defaultLotMissed = false; // the account's default location had no lot; another was preselected
 let pickerOpen = false;    // the location picker is expanded
 let pickerQuery = '';      // what has been typed into its search field
 let lastAction = null;     // last successful write, kept so it can be undone
@@ -684,13 +689,18 @@ function renderCard(product) {
   el.card.hidden = false;
 }
 
-/** Prefer the location configured for this account, else the first lot. */
+/**
+ * Prefer the location configured for this account, else the first lot. The
+ * fallback is a DIFFERENT warehouse than the operator expects, so it is flagged
+ * (see renderLocationPicker) rather than taken quietly.
+ */
 function chooseDefaultLot(product) {
   const preferred = settings.locationId
     ? product.lots.find((l) => String(l.location) === settings.locationId)
     : null;
 
   selectedLotId = preferred ? preferred.id : (product.lots[0] ? product.lots[0].id : '');
+  defaultLotMissed = Boolean(settings.locationId) && !preferred && Boolean(selectedLotId);
 }
 
 const CHEVRON_PATH = 'M6 9.5l6 6 6-6';
@@ -777,10 +787,20 @@ function renderLocationPicker(product) {
   // showing whichever warehouse the API happened to list first.
   el.pPrice.textContent = usable ? formatPrice(selected.lot.price, selected.lot.currency) : '—';
 
-  el.lotHint.textContent = usable
-    ? ''
-    : 'Нет остатка ни на одной локации — коррекцией товар не добавить.';
-  el.lotHint.hidden = usable;
+  // Shown until the operator picks a lot themselves (chooseLot clears it).
+  const warn = usable && defaultLotMissed;
+  row.classList.toggle('row--warn', warn);
+
+  if (!usable) {
+    el.lotHint.textContent = 'Нет остатка ни на одной локации — коррекцией товар не добавить.';
+  } else if (warn) {
+    el.lotHint.textContent = `На локации по умолчанию (${locationLabel(toId(settings.locationId) ?? settings.locationId)}) ` +
+      `этого товара нет — выбрана «${selected.label}». Проверьте перед добавлением.`;
+  } else {
+    el.lotHint.textContent = '';
+  }
+  el.lotHint.classList.toggle('note--warn', warn);
+  el.lotHint.hidden = usable && !warn;
   el.submit.disabled = inFlight || !usable;
 }
 
@@ -910,6 +930,7 @@ function closePicker(product) {
 function chooseLot(product, id) {
   if (inFlight || !id) return;
   selectedLotId = id;
+  defaultLotMissed = false;
   closePicker(product);
 }
 
@@ -949,6 +970,14 @@ function renderProfiles() {
   }
   el.acct.classList.toggle('acct--single', profiles.length < 2);
   syncProfileSwitcher();
+}
+
+/**
+ * focus() alone is not enough: on a field that already has the caret it does
+ * not scroll, so a panel left scrolled down the journal reopened there.
+ */
+function scrollToTop() {
+  window.scrollTo(0, 0);
 }
 
 function focusBarcode() {
@@ -1031,7 +1060,7 @@ async function readStockLog() {
  * Одна запись на каждую подтверждённую коррекцию, включая откат (quantity < 0).
  * Перед записью журнал перечитывается: страница настроек могла его очистить.
  */
-async function addLogEntry(name, quantity, location, correctionId) {
+async function addLogEntry(name, quantity, location, correctionId, status) {
   const entry = {
     at: new Date().toISOString(),
     profile: settings ? profileLabel(settings) : '',
@@ -1041,6 +1070,8 @@ async function addLogEntry(name, quantity, location, correctionId) {
     location,
     correctionId: correctionId === undefined || correctionId === null ? '' : String(correctionId),
   };
+  // Only a write that did not finish carries a status; older entries have none.
+  if (status) entry.status = status;
   try {
     const log = await readStockLog();
     log.unshift(entry);
@@ -1081,8 +1112,19 @@ function renderLog() {
 
     left.append(name, meta);
 
+    // A correction that may exist unapproved is the one row that needs action.
+    if (entry.status === 'pending') {
+      const warn = document.createElement('div');
+      warn.className = 'li__w';
+      warn.textContent = entry.correctionId
+        ? `⚠ не подтверждена №${entry.correctionId} — проверьте в ox-sys`
+        : '⚠ результат неизвестен — проверьте в ox-sys';
+      left.appendChild(warn);
+    }
+
     const qty = document.createElement('span');
     qty.className = entry.quantity < 0 ? 'li__q li__q--neg' : 'li__q';
+    if (entry.status === 'pending') qty.classList.add('li__q--pending');
     // A rollback reads as a real minus sign, not a hyphen.
     qty.textContent = entry.quantity < 0
       ? `−${Math.abs(entry.quantity)}`
@@ -1214,14 +1256,30 @@ async function approveCorrection(id) {
 
 /** Creates the correction, then approves it — stock only moves on the second call. */
 async function writeStock(product, lot, quantity) {
-  const res = await request(profileUrl(settings, settings.stockPath).toString(), {
-    method: settings.stockMethod,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildCorrectionBody(product, lot, quantity)),
-  });
-  if (!res.ok) throw httpError(res);
-
-  const id = correctionId(res.json) ?? await matchingCorrectionId(product, lot, quantity);
+  let id;
+  try {
+    const res = await request(profileUrl(settings, settings.stockPath).toString(), {
+      method: settings.stockMethod,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildCorrectionBody(product, lot, quantity)),
+    });
+    if (!res.ok) throw httpError(res);
+    id = correctionId(res.json) ?? await matchingCorrectionId(product, lot, quantity);
+  } catch (err) {
+    // A POST that timed out or lost its connection may well have landed — the
+    // answer is what went missing. Retrying blind writes a duplicate, so look
+    // for our document first; if it cannot be found the outcome is unknown and
+    // the operator must check before sending again.
+    if (!(err instanceof ApiError) || (err.kind !== 'timeout' && err.kind !== 'network')) throw err;
+    id = await matchingCorrectionId(product, lot, quantity).catch(() => null);
+    if (id === null) {
+      throw new ApiError(
+        `Ответ сервера не получен (${err.message}) — коррекция могла создаться. ` +
+        'Проверьте её в ox-sys перед повторной отправкой.',
+        'pending'
+      );
+    }
+  }
 
   if (id === null) {
     throw new ApiError(
@@ -1236,11 +1294,13 @@ async function writeStock(product, lot, quantity) {
   } catch (err) {
     // The document exists and has moved nothing. Repeating the whole operation
     // would create a SECOND correction, so spell out the safe way forward.
-    throw new ApiError(
+    const pending = new ApiError(
       `Коррекция №${id} создана, но не подтверждена: ${err.message} ` +
       'Подтвердите её в ox-sys — повторная отправка создаст дубль.',
       'pending'
     );
+    pending.correctionId = id;
+    throw pending;
   }
 
   return id;
@@ -1291,6 +1351,16 @@ async function onBarcodeEnter() {
     return;
   }
 
+  // Any other code while a card is open would throw the counted quantity away
+  // unwritten — the operator has already put that box down. Refuse it; Enter
+  // writes the card, Esc drops it.
+  if (currentProduct) {
+    showStatus('Сначала добавьте товар (Enter) или уберите карточку (Esc)', true);
+    beep('err');
+    el.barcode.value = '';
+    return;
+  }
+
   // The server ignores shorter queries; say so instead of "не найден". The card
   // stays: a stray keypress must not throw away an item already counted.
   if (code.length < MIN_QUERY) {
@@ -1301,6 +1371,7 @@ async function onBarcodeEnter() {
 
   hideCard();
   hideDone();
+  scrollToTop();
   setBusy(true);
   showStatus('Поиск…');
 
@@ -1374,6 +1445,7 @@ async function onSubmit() {
     el.qty.value = '1';
     hideCard();
     clearStatus();
+    scrollToTop();
   } catch (err) {
     clearStatus();
     reportError(err);
@@ -1386,6 +1458,8 @@ async function onSubmit() {
     if (err instanceof ApiError && err.kind === 'pending') {
       hideCard();
       el.barcode.value = '';
+      // The banner goes with the next scan; the journal keeps the document.
+      await addLogEntry(product.name, quantity, where, err.correctionId, 'pending');
     }
     // Any other failure: leave the form as it is so the operator can retry.
   } finally {
@@ -1425,6 +1499,7 @@ async function onUndo() {
     if (err instanceof ApiError && err.kind === 'pending') {
       lastAction = null;
       hideDone();
+      await addLogEntry(product.name, -quantity, where, err.correctionId, 'pending');
     }
   } finally {
     setBusy(false);
@@ -1449,6 +1524,16 @@ function bindEvents() {
       hideMatches();
       return;
     }
+    // Esc drops the open card unwritten — the deliberate way out, since a scan
+    // of another product is refused while one is open (see onBarcodeEnter).
+    if (currentProduct && e.key === 'Escape' && !inFlight) {
+      e.preventDefault();
+      hideCard();
+      clearStatus();
+      el.barcode.value = '';
+      focusBarcode();
+      return;
+    }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     onBarcodeEnter();
@@ -1468,6 +1553,14 @@ function bindEvents() {
   el.undo.addEventListener('click', onUndo);
   el.openOptions.addEventListener('click', () => chrome.runtime.openOptionsPage());
   el.openSettings.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+  // Chrome can keep the panel document alive while it is hidden; showing it
+  // again is "opening" it as far as the operator is concerned.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    scrollToTop();
+    focusBarcode();
+  });
 
   // Switching accounts only writes the active id; the storage listener below
   // does the actual reload, so the same path runs however the change arrived.
@@ -1539,6 +1632,7 @@ async function init() {
 
   stockLog = await readStockLog();
   renderLog();
+  scrollToTop();
   focusBarcode();
   if (!locationNames) loadLocations();
 }

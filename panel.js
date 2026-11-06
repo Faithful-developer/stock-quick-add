@@ -57,6 +57,7 @@ let lastQuery = '';        // the code that opened the card; typing it again cou
 let matchList = null;      // { products, index, query } while a partial code is being resolved
 let selectedLotId = '';    // the lot a correction would be written against
 let defaultLotMissed = false; // the account's default location had no lot; another was preselected
+let defaultLotAmbiguous = false; // the preselected lot shares its location with lots at other prices
 let pickerOpen = false;    // the location picker is expanded
 let pickerQuery = '';      // what has been typed into its search field
 let lastAction = null;     // last successful write, kept so it can be undone
@@ -324,14 +325,41 @@ function normalizeProduct(raw) {
   };
 }
 
-/** sellPrice is a multi-currency object; `first` names the primary currency. */
+/**
+ * sellPrice is a multi-currency object; `first` names the primary currency,
+ * with `order` and UZS as fallbacks (the same order payment.js reads amounts in).
+ */
 function lotPrice(lot) {
   const price = lot && lot.sellPrice;
-  const currency = price && typeof price.first === 'string' ? price.first : null;
-  const value = currency && Number.isFinite(Number(price[currency]))
-    ? Number(price[currency])
-    : null;
-  return { price: value, currency };
+  if (!price || typeof price !== 'object') return { price: null, currency: null };
+
+  const keys = [];
+  if (typeof price.first === 'string') keys.push(price.first);
+  if (Array.isArray(price.order)) keys.push(...price.order.filter((k) => typeof k === 'string'));
+  keys.push('UZS');
+
+  for (const currency of keys) {
+    const v = price[currency];
+    if (v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v))) {
+      return { price: Number(v), currency };
+    }
+  }
+  return { price: null, currency: null };
+}
+
+/** Lots compared by what the shop floor sees: the shelf price. */
+function samePrice(a, b) {
+  return a.price === b.price && a.currency === b.currency;
+}
+
+/**
+ * One variation can sit in several lots at different prices — across
+ * warehouses, and within one warehouse when batches arrived at different
+ * prices. Stock added to a lot sells at THAT lot's price, so whenever prices
+ * differ the operator has to see them before choosing.
+ */
+function lotsVaryInPrice(lots) {
+  return lots.some((lot) => !samePrice(lot, lots[0]));
 }
 
 /**
@@ -374,6 +402,8 @@ function formatPrice(value, currency) {
     return new Intl.NumberFormat('ru-RU', {
       style: 'currency',
       currency,
+      // "150 000 UZS", not "150 000,00 UZS" — the price sits in a narrow picker row.
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2,
     }).format(value);
   } catch {
@@ -699,8 +729,15 @@ function chooseDefaultLot(product) {
     ? product.lots.find((l) => String(l.location) === settings.locationId)
     : null;
 
-  selectedLotId = preferred ? preferred.id : (product.lots[0] ? product.lots[0].id : '');
+  const chosen = preferred || product.lots[0] || null;
+  selectedLotId = chosen ? chosen.id : '';
   defaultLotMissed = Boolean(settings.locationId) && !preferred && Boolean(selectedLotId);
+
+  // Several batches in the chosen location at different prices: the first one
+  // listed is just the API's order, not a decision. Flag it like a missed default.
+  defaultLotAmbiguous = Boolean(chosen) && product.lots.some((l) => l !== chosen
+    && String(l.location) === String(chosen.location)
+    && !samePrice(l, chosen));
 }
 
 const CHEVRON_PATH = 'M6 9.5l6 6 6-6';
@@ -722,15 +759,23 @@ function lotOptions(product) {
     ? `${formatNumber(lot.count)} ${product.unit}`
     : formatNumber(lot.count));
 
+  // Price goes on every row as soon as any two lots differ, so lots can be
+  // compared across warehouses as well as within one.
+  const showPrice = lotsVaryInPrice(product.lots);
+
   const options = [];
   for (const [location, lots] of byLocation) {
     for (const lot of lots) {
+      // The price already tells batches apart; the id is only needed for
+      // batches in one location that also share a price.
+      const twin = lots.some((other) => other !== lot && samePrice(other, lot));
       options.push({
         id: lot.id,
         lot,
-        // Lots in one location differ only by batch, so disambiguate by id.
-        label: locationLabel(location) + (lots.length > 1 ? ` · ${lot.id.slice(0, 8)}` : ''),
-        detail: countOf(lot),
+        label: locationLabel(location) + (twin ? ` · ${lot.id.slice(0, 8)}` : ''),
+        detail: showPrice
+          ? `${countOf(lot)} · ${formatPrice(lot.price, lot.currency)}`
+          : countOf(lot),
         disabled: false,
       });
     }
@@ -787,15 +832,18 @@ function renderLocationPicker(product) {
   // showing whichever warehouse the API happened to list first.
   el.pPrice.textContent = usable ? formatPrice(selected.lot.price, selected.lot.currency) : '—';
 
-  // Shown until the operator picks a lot themselves (chooseLot clears it).
-  const warn = usable && defaultLotMissed;
+  // Shown until the operator picks a lot themselves (chooseLot clears both).
+  const warn = usable && (defaultLotMissed || defaultLotAmbiguous);
   row.classList.toggle('row--warn', warn);
 
   if (!usable) {
     el.lotHint.textContent = 'Нет остатка ни на одной локации — коррекцией товар не добавить.';
-  } else if (warn) {
+  } else if (defaultLotMissed) {
     el.lotHint.textContent = `На локации по умолчанию (${locationLabel(toId(settings.locationId) ?? settings.locationId)}) ` +
-      `этого товара нет — выбрана «${selected.label}». Проверьте перед добавлением.`;
+      `этого товара нет — выбрана «${selected.label}» (${selected.detail}). Проверьте перед добавлением.`;
+  } else if (defaultLotAmbiguous) {
+    el.lotHint.textContent = `На локации «${locationLabel(selected.lot.location)}» несколько партий с разной ценой — ` +
+      `выбрана ${formatPrice(selected.lot.price, selected.lot.currency)}. Проверьте перед добавлением.`;
   } else {
     el.lotHint.textContent = '';
   }
@@ -931,6 +979,7 @@ function chooseLot(product, id) {
   if (inFlight || !id) return;
   selectedLotId = id;
   defaultLotMissed = false;
+  defaultLotAmbiguous = false;
   closePicker(product);
 }
 
@@ -1424,10 +1473,12 @@ async function onSubmit() {
   if (quantity === null) return;
 
   const product = currentProduct;
-  // With several accounts in play, a bare location name is ambiguous.
-  const where = profiles.length > 1
-    ? `${profileLabel(settings)} · ${locationLabel(lot.location)}`
+  // With several accounts in play, a bare location name is ambiguous; with lots
+  // at different prices, so is a bare location — the journal names the price.
+  const place = lotsVaryInPrice(product.lots)
+    ? `${locationLabel(lot.location)} · ${formatPrice(lot.price, lot.currency)}`
     : locationLabel(lot.location);
+  const where = profiles.length > 1 ? `${profileLabel(settings)} · ${place}` : place;
 
   setBusy(true);
   showStatus('Отправка…');

@@ -150,6 +150,7 @@ const pel = {
   logList: document.getElementById('payLogList'),
   logCount: document.getElementById('payLogCount'),
   logEmpty: document.getElementById('payLogEmpty'),
+  logMore: document.getElementById('payLogMore'),
 };
 
 // --- raw-number JSON ----------------------------------------------------------
@@ -456,6 +457,9 @@ async function pmFindInList(id, date, zoneHint) {
   if (zoneHint) zones.push(zoneHint);
   for (const z of PM_LIST.zoneCandidates) if (!zones.includes(z)) zones.push(z);
 
+  let answered = false;   // хотя бы один вариант зоны сервер принял
+  let refused = null;     // иначе — чем он ответил
+
   for (const zone of zones) {
     for (let page = 1; page <= PM_LIST.maxPages; page++) {
       const params = {
@@ -469,10 +473,14 @@ async function pmFindInList(id, date, zoneHint) {
 
       const res = await pmGet(pmProfile.sellsListPath, undefined, params);
       if (!res.ok) {
-        // Неудачный фильтр зоны не должен ронять весь поиск.
-        if (page === 1 && zone !== null) break;
+        if (res.status === 401 || res.status === 403) throw httpError(res);
+        // Отвергнутый вариант фильтра зоны не роняет поиск: пробуем следующий.
+        // Это касается и запроса без зоны — тенант может требовать её явно,
+        // и тогда очередь должна дойти до zone[0]=1.
+        if (page === 1) { refused = httpError(res); break; }
         throw httpError(res);
       }
+      answered = true;
       const items = pmItems(pmParse(res.text));
       if (!items) throw new ApiError('Неожиданный формат ответа списка продаж', 'shape', res.status);
 
@@ -487,7 +495,33 @@ async function pmFindInList(id, date, zoneHint) {
       if (items.length < PM_LIST.size) break;
     }
   }
+  // «Не найдена» — только если список хоть раз ответил; иначе это ошибка сервера.
+  if (!answered && refused) throw refused;
   return { notFound: true };
+}
+
+/**
+ * PATCH ушёл, ответ потерялся. Перечитываем продажу и смотрим, что на сервере:
+ *   'applied'   — способы оплаты уже те, что мы отправляли;
+ *   'unchanged' — всё как на карточке, запись не прошла;
+ *   'unknown'   — прочитать не удалось или там что-то третье.
+ */
+async function pmOutcomeAfterLostAnswer(shown, newMethods) {
+  try {
+    const again = await pmLoadSell(shown.id, pel.sellDate.value || '');
+    if (!again.sell) return 'unknown';
+    const now = pmNormalizeSell(again.sell);
+    if (now.fingerprint === shown.fingerprint) return 'unchanged';
+
+    const applied = now.payments.length === shown.payments.length
+      && now.payments.every((p, i) => {
+        const wanted = newMethods[i] === null ? shown.payments[i].methodId : String(newMethods[i]);
+        return p.methodId === wanted && p.price === shown.payments[i].price;
+      });
+    return applied ? 'applied' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 async function pmLoadSell(id, date) {
@@ -752,17 +786,31 @@ function pmSetBusy(busy) {
   pel.reason.disabled = busy;
   pel.confirmYes.disabled = busy;
   pel.confirmNo.disabled = busy;
-  pel.tabStock.disabled = busy;
-  // Переключатель аккаунтов общий с приёмом: panel.js считает его состояние
-  // по обоим инструментам и числу профилей (см. syncProfileSwitcher).
+  // Переключатель аккаунтов и вкладки общие с приёмом: panel.js считает их
+  // состояние по обоим инструментам (см. syncProfileSwitcher).
   syncProfileSwitcher();
   pmUpdateSubmit();
 
   // Смена профиля, пришедшая во время запроса, применяется только теперь.
   if (!busy && pmReloadPending) {
     pmReloadPending = false;
-    pmResetForProfile();
+    pmOnProfilesChanged();
   }
+}
+
+/**
+ * Сбрасывает карточку, только если изменился аккаунт, под которым она открыта.
+ * Событие приходит и при правке ЛЮБОГО другого профиля; терять из-за этого
+ * найденную продажу и набранную причину незачем (так же ведёт себя приём —
+ * см. applyStorageChange в panel.js).
+ */
+async function pmOnProfilesChanged() {
+  const state = await readState();
+  // Пока читали хранилище, мог начаться запрос — он держит pmProfile.
+  if (pmBusy) { pmReloadPending = true; return; }
+  if (pmProfile && state.active
+    && JSON.stringify(state.active) === JSON.stringify(pmProfile)) return;
+  pmResetForProfile();
 }
 
 /** Всё на экране принадлежало прежнему аккаунту. */
@@ -798,13 +846,19 @@ async function pmReadLog() {
   return Array.isArray(s[PM_LOG_KEY]) ? s[PM_LOG_KEY] : [];
 }
 
-async function pmAppendLog(entry) {
-  // Перечитать перед записью: страница настроек могла очистить журнал.
-  const log = await pmReadLog();
-  log.unshift(entry);
-  const kept = log.slice(0, PM_LOG_MAX);
-  await chrome.storage.local.set({ [PM_LOG_KEY]: kept });
-  pmLog = kept;
+/** Все записи одного изменения — одной записью в хранилище, новые сверху. */
+async function pmAppendLog(entries) {
+  try {
+    // Перечитать перед записью: страница настроек могла очистить журнал.
+    const log = await pmReadLog();
+    pmLog = entries.concat(log).slice(0, PM_LOG_MAX);
+    await chrome.storage.local.set({ [PM_LOG_KEY]: pmLog });
+  } catch (err) {
+    // PATCH уже прошёл. Сбой журнала не должен выглядеть как сбой записи:
+    // оператор повторил бы изменение, которое давно применено.
+    console.error('[payment] journal write failed:', err);
+    pmLog = entries.concat(pmLog).slice(0, PM_LOG_MAX);
+  }
 }
 
 function pmLogTitle(e) {
@@ -816,6 +870,8 @@ function pmRenderLog() {
   const shown = pmLog.slice(0, PM_LOG_SHOWN);
   pel.logCount.textContent = String(pmLog.length);
   pel.logEmpty.hidden = shown.length > 0;
+  pel.logMore.hidden = pmLog.length <= PM_LOG_SHOWN;
+  pel.logList.hidden = shown.length === 0;
   pel.logList.textContent = '';
 
   for (const e of shown) {
@@ -827,10 +883,12 @@ function pmRenderLog() {
     n.textContent = pmLogTitle(e);
     const m = document.createElement('div');
     m.className = 'li__m';
-    m.textContent = `${new Date(e.at).toLocaleString('ru-RU')} · ${e.profile || e.host || ''}`;
+    // Тот же короткий формат, что в журнале приёма (logTime из panel.js).
+    m.textContent = [logTime(e.at), e.profile || e.host || ''].filter(Boolean).join(' · ');
     main.append(n, m);
     const q = document.createElement('div');
-    q.className = 'li__q';
+    // Сумма оплаты — справка, а не «+N на склад»: без зелёного.
+    q.className = 'li__q li__q--plain';
     q.textContent = pmMoney(e.amount);
     li.append(main, q);
     pel.logList.appendChild(li);
@@ -943,12 +1001,32 @@ async function pmOnConfirm() {
     }
 
     const bodyText = JSON.stringify(built.body);
-    const res = await pmRequest(pmProfile.sellPatchPath, shown.id, {}, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: bodyText,
-    });
-    if (!res.ok) {
+    let res = null;
+    try {
+      res = await pmRequest(pmProfile.sellPatchPath, shown.id, {}, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyText,
+      });
+    } catch (err) {
+      // Таймаут или обрыв: PATCH мог дойти, потерялся только ответ. Без сети
+      // вовсе запрос не уходил — это обычная ошибка связи.
+      if (!answerLost(err) || (err.kind === 'network' && navigator.onLine === false)) throw err;
+
+      const outcome = await pmOutcomeAfterLostAnswer(shown, newMethods);
+      if (outcome === 'unchanged') {
+        throw new ApiError(`${err.message.replace(/\.$/, '')}. Продажа не изменилась — можно повторить.`, err.kind);
+      }
+      if (outcome !== 'applied') {
+        throw new ApiError(
+          `Ответ сервера не получен (${err.message}) — изменение могло примениться. ` +
+          'Найдите продажу заново и проверьте способ оплаты, прежде чем повторять.',
+          'unknown'
+        );
+      }
+      // 'applied': на сервере уже новые способы — дальше обычный успех.
+    }
+    if (res && !res.ok) {
       // Тело и ответ — в консоль панели: по ним видно, какое поле отвергнуто.
       console.error('[payment] PATCH отклонён', { status: res.status, sent: bodyText, response: res.text });
       throw httpError(res);
@@ -970,7 +1048,7 @@ async function pmOnConfirm() {
       amount: c.from.price,
       reason,
     }));
-    for (const e of entries.slice().reverse()) await pmAppendLog(e);
+    await pmAppendLog(entries);
     pmRenderLog();
 
     pmClearStatus();
@@ -985,6 +1063,9 @@ async function pmOnConfirm() {
     beep('ok');
   } catch (err) {
     pmDisarm();
+    // Что на сервере — неизвестно, значит карточка может врать: убираем её,
+    // чтобы следующее действие началось со свежего чтения.
+    if (err instanceof ApiError && err.kind === 'unknown') pmHideCard();
     pmReportError(err);
     beep('err');
   } finally {
@@ -1037,12 +1118,16 @@ function pmBindEvents() {
   });
 
   // «Все сразу» выставляет выбранный способ каждой строке; дальше строки можно править по одной.
+  // Любая правка после первого нажатия снимает подтверждение: текст в блоке
+  // «Да, изменить» описывает то, что было выбрано в момент нажатия, а запись
+  // берёт текущие значения — без этого подтверждали бы одно, а писали другое.
   pel.all.addEventListener('change', () => {
     if (pel.all.value) for (const sel of pmLineSelects) sel.value = pel.all.value;
+    pmDisarm();
     pmUpdateSubmit();
   });
-  pel.methods.addEventListener('change', () => { pel.all.value = ''; pmUpdateSubmit(); });
-  pel.reason.addEventListener('input', pmUpdateSubmit);
+  pel.methods.addEventListener('change', () => { pel.all.value = ''; pmDisarm(); pmUpdateSubmit(); });
+  pel.reason.addEventListener('input', () => { pmDisarm(); pmUpdateSubmit(); });
   pel.submit.addEventListener('click', () => { if (!pel.submit.disabled) pmArm(); });
   pel.confirmNo.addEventListener('click', () => { pmDisarm(); pmFocusFirstMethod(); });
   pel.confirmYes.addEventListener('click', pmOnConfirm);
@@ -1059,7 +1144,7 @@ function pmBindEvents() {
       pmReloadPending = true;
       return;
     }
-    pmResetForProfile();
+    pmOnProfilesChanged();
   });
 }
 

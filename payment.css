@@ -6,7 +6,8 @@
 .tabs {
   display: flex;
   gap: 2px;
-  margin: 0 var(--pad) 4px;
+  /* 12px до заголовка: с 4px он лип к переключателю. */
+  margin: 0 var(--pad) 12px;
   padding: 2px;
   background: var(--fill);
   border-radius: 9px;
@@ -53,6 +54,10 @@
 }
 
 .tab:not(.tab--on):hover { color: var(--blue); }
+
+/* Заблокированы, пока идёт запрос в любом из инструментов. */
+.tab:disabled { cursor: not-allowed; }
+.tab:disabled:not(.tab--on) { opacity: .4; color: var(--label); }
 
 @media (prefers-color-scheme: dark) {
   .tab--on {
@@ -219,6 +224,9 @@
 .confirm .cta { margin-top: 12px; }
 
 .cta--danger { background: var(--red); color: #fff; }
+
+/* Сумма в журнале оплаты: нейтральная, не «приход». */
+.li__q--plain { font-size: 15px; font-weight: 500; color: var(--label2); }
 
 /* Раздельная оплата: не ошибка, но и не то, что панель имеет право трогать. */
 .warn {

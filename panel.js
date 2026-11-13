@@ -34,6 +34,10 @@ history.scrollRestoration = 'manual';
 const SEARCH_PATH = '/variations';
 const SEARCH_QUERY = { page: '1', size: '50' };
 const LOCATIONS_PATH = '/locations';
+// One page is 100 names; a tenant with more warehouses than that is paged
+// through, up to a ceiling that keeps a misbehaving endpoint from looping.
+const LOCATIONS_PAGE_SIZE = 100;
+const LOCATIONS_MAX_PAGES = 10;
 
 const REQUEST_TIMEOUT_MS = 10000;
 // Журнал приёма — в chrome.storage.local, как и журнал оплаты: переживает
@@ -66,7 +70,7 @@ let inFlight = false;      // guards against double submission from a fast scann
 let reloadPending = false; // settings changed mid-write; applied once it lands
 let statusCritical = false;// current status must survive a reload (see reportError)
 let stockLog = [];         // последние записи журнала приёма (см. STOCK_LOG_KEY)
-let locationNames = null;  // Map<id, name>, best-effort cache for the lot breakdown
+let locationNames = null;  // Map<String(id), name>, best-effort cache for the lot breakdown
 
 // --- element handles ---------------------------------------------------------
 
@@ -106,6 +110,10 @@ const el = {
   logList: document.getElementById('logList'),
   logEmpty: document.getElementById('logEmpty'),
   logCount: document.getElementById('logCount'),
+  logMore: document.getElementById('logMore'),
+  stockView: document.getElementById('stockView'),
+  tabStock: document.getElementById('tabStock'),
+  tabPay: document.getElementById('tabPay'),
 };
 
 // --- errors ------------------------------------------------------------------
@@ -181,13 +189,13 @@ async function requestOnce(url, options = {}) {
   } catch (err) {
     // AbortError means our own timeout fired; anything else is a transport failure.
     if (err && err.name === 'AbortError') {
-      throw new ApiError(`Превышено время ожидания (10 с): ${method} ${url}`, 'timeout');
+      // Host only: the full URL with its query does not fit a 350px banner.
+      throw new ApiError(`Сервер ${hostOf(url)} не ответил за 10 с`, 'timeout');
     }
     // The real reason (Failed to fetch, DNS, TLS, a bad URL) only lives in the
     // console; the banner names the host so a wrong subdomain is obvious.
     console.error('[http]', method, String(url), err);
-    let host = '';
-    try { host = new URL(url).host; } catch { host = String(url); }
+    const host = hostOf(url);
     const detail = err && err.message ? ` (${err.message})` : '';
     const e = new ApiError(`Нет связи с сервером ${host}${detail}. Проверьте интернет и адрес аккаунта в настройках.`, 'network');
     e.cause = err;
@@ -195,6 +203,15 @@ async function requestOnce(url, options = {}) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+function hostOf(url) {
+  try { return new URL(url).host; } catch { return String(url); }
+}
+
+/** The answer went missing, so the request may or may not have been carried out. */
+function answerLost(err) {
+  return err instanceof ApiError && (err.kind === 'timeout' || err.kind === 'network');
 }
 
 /**
@@ -277,8 +294,16 @@ function serverMessage(json, text, status) {
 
 /** Turns a non-2xx result into an ApiError. */
 function httpError(res) {
-  if (res.status === 401 || res.status === 403) {
-    return new ApiError('Токен недействителен. Проверьте настройки.', 'auth', res.status);
+  if (res.status === 401) {
+    return new ApiError('Токен недействителен (HTTP 401). Проверьте настройки.', 'auth', 401);
+  }
+  // 403 is as often a token that lacks the right as a token that is wrong, and
+  // "недействителен" sends the operator off to re-paste a perfectly good one.
+  if (res.status === 403) {
+    return new ApiError(
+      'Доступ запрещён (HTTP 403): токен недействителен или у него нет прав на это действие.',
+      'auth', 403
+    );
   }
   return new ApiError(serverMessage(res.json, res.text, res.status), 'http', res.status);
 }
@@ -412,9 +437,20 @@ function formatPrice(value, currency) {
   }
 }
 
+/**
+ * Ids are compared as strings: /locations and the lots inside /variations are
+ * different endpoints, and a number on one side against a digit string on the
+ * other would silently show "Локация 7" next to a named-but-"empty" duplicate.
+ */
 function locationLabel(id) {
-  if (locationNames && locationNames.has(id)) return locationNames.get(id);
-  return `Локация ${id}`;
+  const key = String(id);
+  if (locationNames && locationNames.has(key)) return locationNames.get(key);
+  return `Локация ${key}`;
+}
+
+/** Product plus variation — a journal row reading just "iPhone 15" names nothing. */
+function productTitle(product) {
+  return product.variation ? `${product.name} · ${product.variation}` : product.name;
 }
 
 // --- sound -------------------------------------------------------------------
@@ -535,7 +571,7 @@ function bannerBody(title, sub) {
  * One element serves both jobs: quiet grey text while a request is in flight,
  * a full banner when something went wrong. Progress should not shout.
  */
-function showStatus(text, isError = false) {
+function showStatus(text, isError = false, detail = '') {
   el.status.textContent = '';
   statusCritical = false;
 
@@ -547,7 +583,7 @@ function showStatus(text, isError = false) {
   }
 
   el.status.className = 'banner';
-  el.status.append(bannerIcon('err'), bannerBody(text));
+  el.status.append(bannerIcon('err'), bannerBody(text, detail));
   el.status.hidden = false;
 }
 
@@ -650,7 +686,7 @@ function renderMatches() {
     if (i === index) item.classList.add('picker__opt--on');
 
     const label = document.createElement('span');
-    label.textContent = product.variation ? `${product.name} · ${product.variation}` : product.name;
+    label.textContent = productTitle(product);
 
     item.append(label, markedBarcode(product.barcode, query));
     item.addEventListener('click', () => pickMatch(i));
@@ -751,8 +787,9 @@ const CHEVRON_PATH = 'M6 9.5l6 6 6-6';
 function lotOptions(product) {
   const byLocation = new Map();
   for (const lot of product.lots) {
-    if (!byLocation.has(lot.location)) byLocation.set(lot.location, []);
-    byLocation.get(lot.location).push(lot);
+    const key = String(lot.location);
+    if (!byLocation.has(key)) byLocation.set(key, []);
+    byLocation.get(key).push(lot);
   }
 
   const countOf = (lot) => (product.unit
@@ -839,7 +876,7 @@ function renderLocationPicker(product) {
   if (!usable) {
     el.lotHint.textContent = 'Нет остатка ни на одной локации — коррекцией товар не добавить.';
   } else if (defaultLotMissed) {
-    el.lotHint.textContent = `На локации по умолчанию (${locationLabel(toId(settings.locationId) ?? settings.locationId)}) ` +
+    el.lotHint.textContent = `На локации по умолчанию (${locationLabel(settings.locationId)}) ` +
       `этого товара нет — выбрана «${selected.label}» (${selected.detail}). Проверьте перед добавлением.`;
   } else if (defaultLotAmbiguous) {
     el.lotHint.textContent = `На локации «${locationLabel(selected.lot.location)}» несколько партий с разной ценой — ` +
@@ -999,7 +1036,13 @@ let externalBusy = () => false;
  * disabled by an earlier request would ignore every click.
  */
 function syncProfileSwitcher() {
-  el.profile.disabled = inFlight || externalBusy() || profiles.length < 2;
+  const busy = inFlight || externalBusy();
+  el.profile.disabled = busy || profiles.length < 2;
+  // The tabs lock with it. A result lands in the view that asked for it, so
+  // leaving mid-write means the one banner that matters — "создана, но не
+  // подтверждена" — is shown where nobody is looking.
+  el.tabStock.disabled = busy;
+  el.tabPay.disabled = busy;
 }
 
 /** The switcher is a transparent select over the name; hidden with one account. */
@@ -1031,8 +1074,7 @@ function scrollToTop() {
 
 function focusBarcode() {
   // The payment tool owns focus while its view is up (see payment.js).
-  const stockView = document.getElementById('stockView');
-  if (stockView && stockView.hidden) return;
+  if (el.stockView.hidden) return;
   el.barcode.focus();
   el.barcode.select();
 }
@@ -1184,6 +1226,8 @@ function renderLog() {
   }
 
   el.logCount.textContent = String(stockLog.length);
+  // The counter is the whole journal; say so when the list is only its head.
+  el.logMore.hidden = stockLog.length <= STOCK_LOG_SHOWN;
   el.logEmpty.hidden = stockLog.length > 0;
   el.logList.hidden = stockLog.length === 0;
 }
@@ -1199,14 +1243,36 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 /** Best-effort: used only to label the per-location breakdown. */
 async function loadLocations() {
+  // request() signs with whatever `settings` is at call time, so every step
+  // below re-checks that the account has not been switched underneath it: a
+  // late page must neither carry the new token to the old host nor paint the
+  // old tenant's warehouse names over the new one's.
+  const profile = settings;
+  const switched = () => settings !== profile;
+
   try {
-    const url = profileUrl(settings, LOCATIONS_PATH, { page: '1', size: '100' });
+    const names = new Map();
+    const size = LOCATIONS_PAGE_SIZE;
 
-    const res = await request(url.toString(), { method: 'GET' });
-    if (!res.ok) return;
+    for (let page = 1; page <= LOCATIONS_MAX_PAGES; page++) {
+      if (switched()) return;
+      const url = profileUrl(profile, LOCATIONS_PATH, { page: String(page), size: String(size) });
+      const res = await request(url.toString(), { method: 'GET' });
+      if (switched()) return;
+      if (!res.ok) break;
 
-    const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
-    locationNames = new Map(items.map((l) => [l.id, String(l.name || `Локация ${l.id}`)]));
+      const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
+      const before = names.size;
+      for (const l of items) names.set(String(l.id), String(l.name || `Локация ${l.id}`));
+
+      // Stop on a short page, on a page that added nothing (an endpoint that
+      // ignores `page` repeats itself forever), or once the total is reached.
+      const total = toNumber(res.json && res.json.total_count);
+      if (items.length < size || names.size === before || (total && names.size >= total)) break;
+    }
+
+    if (!names.size) return;
+    locationNames = names;
 
     // Names usually arrive after the first scan of a session. Re-render the open
     // card, or it shows raw ids for as long as that card is up.
@@ -1266,6 +1332,15 @@ function correctionId(json) {
   return null;
 }
 
+/** The newest few corrections, or null when the list could not be read. */
+async function recentCorrections() {
+  const url = profileUrl(settings, settings.stockPath, { page: '1', size: '5' });
+
+  const res = await request(url.toString(), { method: 'GET' });
+  if (!res.ok) return null;
+  return res.json && Array.isArray(res.json.items) ? res.json.items : [];
+}
+
 /** Does this listed correction hold exactly the record we just posted? */
 function matchesWrite(item, product, lot, quantity) {
   const records = Array.isArray(item && item.records) ? item.records : [];
@@ -1284,17 +1359,24 @@ function matchesWrite(item, product, lot, quantity) {
  * and count. No match means no approval; the caller reports it as pending.
  */
 async function matchingCorrectionId(product, lot, quantity) {
-  const url = profileUrl(settings, settings.stockPath, { page: '1', size: '5' });
+  const items = await recentCorrections();
+  if (!items) return null;
 
-  const res = await request(url.toString(), { method: 'GET' });
-  if (!res.ok) return null;
-
-  const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
   for (const item of items) {
     if (item && item.approved) continue;
     if (matchesWrite(item, product, lot, quantity)) return toId(item.id);
   }
   return null;
+}
+
+/**
+ * Did an approve whose answer never arrived go through anyway? Only an explicit
+ * `approved: true` on OUR document counts; anything else stays "unknown".
+ */
+async function correctionApproved(id) {
+  const items = await recentCorrections();
+  const hit = (items || []).find((item) => item && toId(item.id) === id);
+  return Boolean(hit) && hit.approved === true;
 }
 
 async function approveCorrection(id) {
@@ -1319,35 +1401,54 @@ async function writeStock(product, lot, quantity) {
     // answer is what went missing. Retrying blind writes a duplicate, so look
     // for our document first; if it cannot be found the outcome is unknown and
     // the operator must check before sending again.
-    if (!(err instanceof ApiError) || (err.kind !== 'timeout' && err.kind !== 'network')) throw err;
+    if (!answerLost(err)) throw err;
+    // With no network interface at all the request never left this machine.
+    // That is a plain "нет связи": the card stays and Enter retries. Treating
+    // it as "могла создаться" would wipe a counted card every time the Wi-Fi
+    // blinks and fill the journal with warnings about documents that never were.
+    if (err.kind === 'network' && navigator.onLine === false) throw err;
     id = await matchingCorrectionId(product, lot, quantity).catch(() => null);
     if (id === null) {
-      throw new ApiError(
-        `Ответ сервера не получен (${err.message}) — коррекция могла создаться. ` +
+      const unknown = new ApiError(
+        `Ответ сервера не получен (${err.message.replace(/\.$/, '')}) — коррекция могла создаться. ` +
         'Проверьте её в ox-sys перед повторной отправкой.',
         'pending'
       );
+      unknown.title = 'Результат неизвестен';
+      throw unknown;
     }
   }
 
   if (id === null) {
-    throw new ApiError(
+    const unnumbered = new ApiError(
       'Коррекция создана, но её номер не получен. Подтвердите её в ox-sys вручную — ' +
       'повторная отправка создаст дубль.',
       'pending'
     );
+    unnumbered.title = 'Коррекция не подтверждена';
+    throw unnumbered;
   }
 
   try {
     await approveCorrection(id);
   } catch (err) {
-    // The document exists and has moved nothing. Repeating the whole operation
-    // would create a SECOND correction, so spell out the safe way forward.
+    // A lost answer is not a refusal: the approve may have landed, and then the
+    // stock HAS moved. Look before telling the operator to approve it by hand.
+    const lost = answerLost(err);
+    if (lost && await correctionApproved(id).catch(() => false)) return id;
+
+    // The document exists and (as far as can be told) has moved nothing.
+    // Repeating the whole operation would create a SECOND correction, so spell
+    // out the safe way forward.
+    const why = err.message.replace(/\.$/, '');
     const pending = new ApiError(
-      `Коррекция №${id} создана, но не подтверждена: ${err.message} ` +
-      'Подтвердите её в ox-sys — повторная отправка создаст дубль.',
+      (lost
+        ? `Документ создан, но ответ на подтверждение не получен: ${why}. `
+        : `Документ создан, но сервер его не подтвердил: ${why}. `) +
+      'Проверьте и подтвердите его в ox-sys — повторная отправка создаст дубль.',
       'pending'
     );
+    pending.title = `Коррекция №${id} не подтверждена`;
     pending.correctionId = id;
     throw pending;
   }
@@ -1357,10 +1458,10 @@ async function writeStock(product, lot, quantity) {
 
 // --- handlers ----------------------------------------------------------------
 
-function handleAuthError() {
+function handleAuthError(err) {
   hideCard();
   showStatusWithAction(
-    'Токен недействителен. Проверьте настройки.',
+    err.message,
     'Открыть настройки',
     () => chrome.runtime.openOptionsPage()
   );
@@ -1369,13 +1470,27 @@ function handleAuthError() {
 /** Every thrown error reaches the operator through exactly one surface. */
 function reportError(err) {
   if (err instanceof ApiError && err.kind === 'auth') {
-    handleAuthError();
+    handleAuthError(err);
     return;
   }
-  showStatus(err instanceof ApiError ? err.message : 'Неизвестная ошибка', true);
+  if (!(err instanceof ApiError)) console.error('[stock]', err);
+  // A long explanation set entirely in the banner's bold title is a wall of
+  // text; errors that carry a `title` get it as the headline and the rest below.
+  if (err instanceof ApiError && err.title) showStatus(err.title, true, err.message);
+  else showStatus(err instanceof ApiError ? err.message : 'Неизвестная ошибка', true);
   // A 'pending' correction names a document the operator still has to approve by
-  // hand. Nothing may wipe that off the screen — see applyStorageChange().
+  // hand. Nothing may wipe that off the screen — see applyStorageChange() — and
+  // it must not look like the ordinary "не найден" it sits in the place of.
   statusCritical = err instanceof ApiError && err.kind === 'pending';
+  el.status.classList.toggle('banner--critical', statusCritical);
+}
+
+/** Drops the open card unwritten and goes back to scanning. */
+function dropCard() {
+  hideCard();
+  clearStatus();
+  el.barcode.value = '';
+  focusBarcode();
 }
 
 async function onBarcodeEnter() {
@@ -1396,6 +1511,9 @@ async function onBarcodeEnter() {
   if (currentProduct && (code === currentProduct.barcode || code === lastQuery)) {
     stepQty(1);
     el.barcode.value = '';
+    // A refusal left over from the previous scan ("Сначала добавьте товар…")
+    // no longer describes anything once a scan has been accepted.
+    if (el.status.classList.contains('banner')) clearStatus();
     beep('tick');
     return;
   }
@@ -1486,9 +1604,9 @@ async function onSubmit() {
   try {
     const id = await writeStock(product, lot, quantity);
 
-    await addLogEntry(product.name, quantity, where, id);
+    await addLogEntry(productTitle(product), quantity, where, id);
     lastAction = { product, lot, quantity, where };
-    showDone(`${product.name} +${quantity}`, `${where} · коррекция №${id} подтверждена`, true);
+    showDone(`${productTitle(product)} +${quantity}`, `${where} · коррекция №${id} подтверждена`, true);
     beep('ok');
 
     // Success: clear the form completely and go back to scanning.
@@ -1510,7 +1628,7 @@ async function onSubmit() {
       hideCard();
       el.barcode.value = '';
       // The banner goes with the next scan; the journal keeps the document.
-      await addLogEntry(product.name, quantity, where, err.correctionId, 'pending');
+      await addLogEntry(productTitle(product), quantity, where, err.correctionId, 'pending');
     }
     // Any other failure: leave the form as it is so the operator can retry.
   } finally {
@@ -1535,9 +1653,9 @@ async function onUndo() {
   try {
     const id = await writeStock(product, lot, -quantity);
 
-    await addLogEntry(product.name, -quantity, where, id);
+    await addLogEntry(productTitle(product), -quantity, where, id);
     lastAction = null;
-    showDone(`Отменено: ${product.name} −${quantity}`, `${where} · коррекция №${id}`, false);
+    showDone(`Отменено: ${productTitle(product)} −${quantity}`, `${where} · коррекция №${id}`, false);
     clearStatus();
     beep('undone');
   } catch (err) {
@@ -1550,7 +1668,7 @@ async function onUndo() {
     if (err instanceof ApiError && err.kind === 'pending') {
       lastAction = null;
       hideDone();
-      await addLogEntry(product.name, -quantity, where, err.correctionId, 'pending');
+      await addLogEntry(productTitle(product), -quantity, where, err.correctionId, 'pending');
     }
   } finally {
     setBusy(false);
@@ -1579,10 +1697,7 @@ function bindEvents() {
     // of another product is refused while one is open (see onBarcodeEnter).
     if (currentProduct && e.key === 'Escape' && !inFlight) {
       e.preventDefault();
-      hideCard();
-      clearStatus();
-      el.barcode.value = '';
-      focusBarcode();
+      dropCard();
       return;
     }
     if (e.key !== 'Enter') return;
@@ -1591,14 +1706,40 @@ function bindEvents() {
   });
 
   // Enter in the quantity field submits too, so the flow never needs the mouse.
+  // Esc works here as well: the hint under the button promises it, and an
+  // operator who has just typed a quantity is in this field, not the other.
   el.qty.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && currentProduct && !inFlight) {
+      e.preventDefault();
+      dropCard();
+      return;
+    }
     if (e.key !== 'Enter') return;
     e.preventDefault();
     onSubmit();
   });
 
-  el.qtyMinus.addEventListener('click', () => stepQty(-1));
-  el.qtyPlus.addEventListener('click', () => stepQty(1));
+  // A click leaves focus on the button, and the scanner's Enter would then
+  // "press" it: every scan silently becomes ±1 and its digits go nowhere.
+  el.qtyMinus.addEventListener('click', () => { stepQty(-1); focusBarcode(); });
+  el.qtyPlus.addEventListener('click', () => { stepQty(1); focusBarcode(); });
+
+  // Safety net for every other way focus can end up on a button or on nothing
+  // (a click on empty ground, Tab, a control that was disabled while focused):
+  // the first character of a scan pulls the caret back into the barcode field
+  // and is typed there. Fields that take text of their own are left alone.
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length !== 1 || e.key === ' ') return;
+    if (el.app.hidden || el.stockView.hidden || el.barcode.disabled) return;
+
+    const t = e.target;
+    const typesText = t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement
+      || t instanceof HTMLSelectElement || (t instanceof HTMLElement && t.isContentEditable);
+    if (typesText) return;
+
+    el.barcode.focus();
+  });
 
   el.submit.addEventListener('click', onSubmit);
   el.undo.addEventListener('click', onUndo);

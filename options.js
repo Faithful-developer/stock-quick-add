@@ -11,6 +11,8 @@
 
 const COMMAND_NAME = 'open-panel';
 const REQUEST_TIMEOUT_MS = 10000;
+const LOCATIONS_PAGE_SIZE = 100;
+const LOCATIONS_MAX_PAGES = 10;
 
 // Key under which the not-yet-saved profile parks its draft.
 const DRAFT_NEW = '__new__';
@@ -165,22 +167,40 @@ async function loadLocations(profile) {
   }
 
   try {
-    const res = await apiGet(profile, '/locations', { page: '1', size: '100' });
-    if (!current()) return;
+    // Paged, like the panel: one page is 100, and a tenant with more warehouses
+    // than that could otherwise never pick the 101st as its default.
+    const byId = new Map();
+    for (let page = 1; page <= LOCATIONS_MAX_PAGES; page++) {
+      const res = await apiGet(profile, '/locations', {
+        page: String(page), size: String(LOCATIONS_PAGE_SIZE),
+      });
+      if (!current()) return;
 
-    if (!res.ok) {
-      el.locationHint.textContent = `Не удалось загрузить список (HTTP ${res.status}).`;
-      return;
+      if (!res.ok) {
+        if (page > 1) break;
+        el.locationHint.textContent = `Не удалось загрузить список (HTTP ${res.status}).`;
+        return;
+      }
+
+      const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
+      const before = byId.size;
+      for (const loc of items) {
+        byId.set(String(loc.id), {
+          id: String(loc.id),
+          label: loc.name ? `${loc.name} (#${loc.id})` : `Локация ${loc.id}`,
+        });
+      }
+
+      const total = Number(res.json && res.json.total_count) || 0;
+      if (items.length < LOCATIONS_PAGE_SIZE || byId.size === before || (total && byId.size >= total)) break;
     }
 
-    const items = res.json && Array.isArray(res.json.items) ? res.json.items : [];
-    locationItems = items.map((loc) => ({
-      id: String(loc.id),
-      label: loc.name ? `${loc.name} (#${loc.id})` : `Локация ${loc.id}`,
-    }));
+    locationItems = [...byId.values()];
 
-    renderLocationOptions(profile.locationId);
-    el.locationHint.textContent = `Загружено локаций: ${items.length}. Поиск — в поле выше.`;
+    // No explicit id: keep whatever is selected NOW. The operator may have
+    // picked a location while the list was still arriving.
+    renderLocationOptions();
+    el.locationHint.textContent = `Загружено локаций: ${locationItems.length}. Поиск — в поле выше.`;
   } catch (err) {
     if (!current()) return;
     el.locationHint.textContent = err.message;

@@ -107,6 +107,13 @@ button { font: inherit; letter-spacing: inherit; }
 }
 .acct--single .acct__chev,
 .acct--single .acct__select { display: none; }
+/* The select is invisible, so its own focus ring is too; draw it on the name. */
+.acct:has(.acct__select:focus-visible) {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.acct:has(.acct__select:disabled) .acct__chev { opacity: .4; }
 
 .navbtn {
   display: flex;
@@ -456,6 +463,10 @@ button { font: inherit; letter-spacing: inherit; }
 }
 .banner__i--ok { background: var(--green); }
 .banner__i--err { background: var(--red); }
+/* A write whose outcome a person still has to check in ox-sys. Same orange as
+   the journal row it leaves behind, so the two read as one thing. */
+.banner--critical { box-shadow: inset 4px 0 0 var(--orange); }
+.banner--critical .banner__i--err { background: var(--orange); }
 .banner__t { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
 .banner__t:empty,
 .banner__s:empty { display: none; }

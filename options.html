@@ -175,7 +175,8 @@
   <input id="sellPatchPath" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="/sells/{id}/patch">
   <p class="field__hint">
     <code>PATCH</code>. Тело собирается из ответа продажи целиком, меняется только
-    <code>payments[].paymentMethod</code>; раздельная оплата не трогается.
+    <code>payments[].paymentMethod</code> выбранных строк; суммы и остальные строки
+    раздельной оплаты уходят без изменений.
   </p>
 </div>
 

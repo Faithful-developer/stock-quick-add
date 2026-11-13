@@ -42,8 +42,18 @@ function profileBase(profile) {
  * entirely. The options form is not the place to catch this — migrateLegacy()
  * and values stored by older builds never pass through it.
  */
+/**
+ * Stored values are read back through makeProfile() on every load, so one field
+ * of the wrong type (a numeric locationId written by an old build, say) must not
+ * throw there: readState() would fail for EVERY profile and the panel would
+ * come up as if nothing had ever been configured.
+ */
+function text(value) {
+  return value === null || value === undefined ? '' : String(value).trim();
+}
+
 function normalizePath(value, fallback) {
-  const path = (value || '').trim();
+  const path = text(value);
   if (!path) return fallback;
   return '/' + path.replace(/^\/+/, '');
 }
@@ -52,7 +62,7 @@ function normalizePath(value, fallback) {
 const STOCK_METHODS = ['POST', 'PUT', 'PATCH'];
 
 function normalizeMethod(value) {
-  const method = (value || '').trim().toUpperCase();
+  const method = text(value).toUpperCase();
   return STOCK_METHODS.includes(method) ? method : DEFAULTS.stockMethod;
 }
 
@@ -109,13 +119,13 @@ const LEGACY_KEYS = [
 function makeProfile(values = {}) {
   return {
     id: values.id || crypto.randomUUID(),
-    name: (values.name || '').trim(),
-    subdomain: (values.subdomain || '').trim(),
+    name: text(values.name),
+    subdomain: text(values.subdomain),
     domain: DOMAINS.includes(values.domain) ? values.domain : DEFAULTS.domain,
-    token: (values.token || '').trim(),
+    token: text(values.token),
     authScheme: values.authScheme || DEFAULTS.authScheme,
-    locationId: (values.locationId || '').trim(),
-    reason: (values.reason || '').trim() || DEFAULTS.reason,
+    locationId: text(values.locationId),
+    reason: text(values.reason) || DEFAULTS.reason,
     stockPath: normalizePath(values.stockPath, DEFAULTS.stockPath),
     stockMethod: normalizeMethod(values.stockMethod),
     sellPath: normalizePath(values.sellPath, DEFAULTS.sellPath),
